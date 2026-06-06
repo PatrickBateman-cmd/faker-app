@@ -1,6 +1,26 @@
 # Faker App
 
-Synthetic dataset generator with ISO 20022 integration, financial data, aggregation, dedup, and multi-format exports.
+Synthetic dataset generator with ISO 20022 integration, financial data (yfinance), aggregation/dedup, multi-format exports, and a full CLI.
+
+**Stack**: Python 3.14 / FastAPI / DuckDB / React 19 / Vite / Tailwind CSS v4 / Recharts / Catppuccin theme
+
+## Features
+
+- **Data Generation** — 1–4 datasets per run, configurable homogeneity (1–100%), deterministic seeds, 50+ Faker generators
+- **Formula evaluation** — Cross-field Jinja2 templates (`{{first_name|lower}}.{{last_name|lower}}@example.com`)
+- **Conditional fields** — `condition: "age >= 18"` skips fields based on other column values
+- **Null probability** — Per-field NULL injection for realistic missing data
+- **Weighted random elements** — Distribution weights for enum-style fields
+- **Template Library** — Reusable XML templates stored on disk, CRUD via API/CLI
+- **ISO 20022 Integration** — Live catalog browser, XSD parser → Faker generator mapping, "Save as Template"
+- **Financial Data** — Real-time quotes and historical data via Yahoo Finance (yfinance), batch-to-dataset, enrichment
+- **Aggregation & Deduplication** — SQL-based GROUP BY and ROW_NUMBER() via DuckDB
+- **CLI** — Full-featured command-line interface (typer) with rich tables, JSON output, progress bars
+- **Exports** — CSV, Parquet, XLSX, JSON Lines
+- **Database Migrations** — Auto-applied on startup, no manual `.duckdb` deletion needed
+- **Catppuccin Theme** — 4 variants (Mocha/Macchiato/Frappé/Latte), persisted to localStorage
+- **Dataset charting** — Bar/line/pie charts for any dataset's numeric columns
+- **Docker Compose** — Production-ready deployment with nginx reverse proxy
 
 ## Prerequisites
 
@@ -25,12 +45,13 @@ cd frontend
 npm install                # install JS dependencies
 ```
 
-## Run (two terminals)
+## Run
+
+### Web UI (two terminals)
 
 **Terminal 1 — Backend (port 8000):**
 ```sh
 cd backend
-rm -f duckdb/default_user.duckdb   # clean slate if schema changed
 uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
@@ -40,7 +61,39 @@ cd frontend
 npm run dev
 ```
 
-Open **http://localhost:5173** in a browser. Vite proxies `/api/*` → `http://localhost:8000` (strips `/api` prefix).
+Open **http://localhost:5173**. Vite proxies `/api/*` → `http://localhost:8000`.
+
+### CLI (no server needed)
+
+```sh
+cd backend
+uv run faker init                                              # Init DuckDB
+uv run faker generate --name "demo" --rows 100 --template Person  # Generate
+uv run faker datasets list                                     # List datasets
+uv run faker datasets view <ID>                                # View rows
+uv run faker datasets export <ID> csv -o data.csv              # Export
+uv run faker iso search pacs                                   # ISO search
+uv run faker financial quote AAPL                              # Stock quote
+uv run faker financial enrich <ID> --ticker-column sym --enrich price,volume  # Enrich
+uv run faker transform aggregate <ID> --name "r" --group-by country --agg "amount:sum:total"  # Aggregate
+uv run faker transform dedup <ID> --name "r" --keys email      # Deduplicate
+```
+
+All CLI commands support `--format json` and `--db <path>`.
+
+### Shell Completion
+
+```sh
+uv run faker --install-completion   # Install tab completion
+uv run faker --show-completion      # Preview script
+```
+
+### Tests
+
+```sh
+cd backend && uv run pytest tests/ -v     # 40 backend tests
+cd frontend && npx vitest run             # 2 frontend tests
+```
 
 ## Environment
 
@@ -56,35 +109,41 @@ Open **http://localhost:5173** in a browser. Vite proxies `/api/*` → `http://l
 | `MAX_ROWS_PER_DATASET` | `100000` | Max rows per generated dataset |
 | `MAX_DATASETS_PER_RUN` | `4` | Max datasets per generation |
 
-## CLI (no server needed)
-
-All backend features are available from the command line without starting the web server:
+## Docker
 
 ```sh
-cd backend
-
-uv run faker init                                              # Init DuckDB
-uv run faker generate --name "demo" --rows 100 --template Person  # Generate
-uv run faker datasets list                                     # List datasets
-uv run faker datasets view <ID>                                # View rows
-uv run faker datasets export <ID> csv -o data.csv              # Export
-uv run faker iso search pacs                                   # ISO search
-uv run faker financial quote AAPL                              # Stock quote
-uv run faker financial batch "AAPL,MSFT,GOOG"                  # Batch → dataset
-uv run faker transform aggregate <ID> --name "r" --group-by country --agg "amount:sum:total"  # Aggregate
-uv run faker transform dedup <ID> --name "r" --keys email      # Deduplicate
+docker compose up --build
 ```
 
-Add `--format json` for JSON output, `--db <path>` for custom DuckDB path.
-
-## Quick Test (Web UI)
+Backend on `http://localhost:8000`, frontend on `http://localhost:80`.
 
 ## Notes
 
 - **Cold start**: yfinance takes ~5s to import on first startup.
 - **DuckDB**: single-writer lock, can't query the `.duckdb` file while the server runs.
-- **Stale database**: if schemas change between versions, delete `backend/duckdb/default_user.duckdb` and restart.
-- **ISO 20022**: when iso20022.org is unreachable, the app uses hardcoded fallback data (5 domains, 12 messages, 15 demo fields).
-- **ISO → Template**: browse ISO messages in the ISO 20022 panel, click "Save as Template" to create a reusable XML template. The template appears in the Template Library and can be applied to Generation on future visits.
-- **Theme**: 4 Catppuccin variants (Mocha/Macchiato/Frappé/Latte) via the ThemeSwitcher dropdown in the sidebar. Persisted to localStorage.
-- **Financial batch**: enter multiple stock symbols in the Financial panel's textarea to fetch quotes and save them as a DuckDB dataset (viewable, exportable, aggregate-able).
+- **Schema migrations**: auto-applied on startup — no manual `rm duckdb/` needed.
+- **ISO 20022**: offline-capable (cached in DuckDB with 1h TTL). When iso20022.org is unreachable, falls back to cached or hardcoded data.
+- **Formula fields**: use Jinja2 syntax (`{{field_name|lower}}`) and reference fields that appear earlier in the field list.
+- **Financial enrich**: joins yfinance quote data against an existing dataset on a ticker column, creating a new enriched dataset.
+- **Catppuccin theme**: 4 variants via the ThemeSwitcher dropdown in the sidebar, persisted to localStorage.
+- **No auth**: `AUTH_ENABLED` setting is declared but unimplemented — all endpoints are public.
+
+## Quick Test (Web UI)
+
+```sh
+# Health
+curl http://localhost:8000/health
+
+# Generate 50 rows
+curl -X POST http://localhost:8000/generate \
+  -H 'Content-Type: application/json' \
+  -d '{"datasets":[{"name":"demo","rows":50,"fields":[{"name":"name","generator":"name","type":"string"},{"name":"email","generator":"email","type":"string"}]}],"homogeneity":100,"seed":42}'
+
+# List datasets
+curl http://localhost:8000/datasets
+
+# Export CSV (replace DATASET_ID)
+curl http://localhost:8000/datasets/DATASET_ID/export/csv
+```
+
+See `CHEATSHEET.md` for the full command reference.

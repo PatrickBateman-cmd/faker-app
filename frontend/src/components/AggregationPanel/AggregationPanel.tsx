@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { TransformResponse } from "../../types/transform";
+import { useToast } from "../../hooks/useToast";
 
 const AGG_FUNCTIONS = [
   { value: "sum", label: "Sum" },
@@ -31,6 +32,7 @@ export default function AggregationPanel({
   onResult,
   onBack,
 }: Props) {
+  const { addToast } = useToast();
   const [name, setName] = useState("");
   const [groupBy, setGroupBy] = useState<string[]>([]);
   const [aggregations, setAggregations] = useState<AggregationDef[]>([
@@ -110,8 +112,11 @@ export default function AggregationPanel({
       }
       const result = await res.json();
       onResult(result);
+      addToast("Aggregation completed", "success");
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Unknown error");
+      const msg = e instanceof Error ? e.message : "Unknown error";
+      setError(msg);
+      addToast(msg, "error");
     } finally {
       setLoading(false);
     }

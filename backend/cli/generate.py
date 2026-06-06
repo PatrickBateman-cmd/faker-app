@@ -65,12 +65,14 @@ def generate(
                 "name": tpl_name,
                 "rows": rows,
                 "template": template,
-                "fields": [
+                    "fields": [
                     {
                         "name": f.name,
                         "type": f.type if f.type else "string",
                         "generator": f.generator if f.generator else "text",
+                        "null_probability": f.null_probability,
                         "constraint": _constraint_to_dict(f.constraint) if f.constraint else None,
+                        "condition": f.condition,
                     }
                     for f in tpl.fields
                 ],
@@ -144,6 +146,8 @@ def _parse_dataset_def(d: dict) -> DatasetDefinition:
                 type=f.get("type", "string"),
                 generator=f.get("generator", "text"),
                 constraint=constraint,
+                null_probability=f.get("null_probability"),
+                condition=f.get("condition"),
             )
         )
     return DatasetDefinition(
@@ -161,6 +165,7 @@ def _constraint_to_dict(c) -> dict | None:
         "min_age": c.min_age,
         "max_age": c.max_age,
         "values": c.values,
+        "weights": c.weights,
         "right_digits": c.right_digits,
         "format": c.format,
         "start": c.start,

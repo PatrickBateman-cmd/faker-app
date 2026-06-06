@@ -139,3 +139,96 @@ def batch_to_dataset(symbols: list[str], name: str | None = None) -> DatasetResu
         row_count=row_count,
         columns=QUOTE_COLUMNS,
     )
+
+
+def enrich_dataset(
+    source_dataset_id: str,
+    ticker_column: str,
+    enrichments: list[dict],
+    name: str | None = None,
+) -> dict:
+    from app.schemas.financial import EnrichmentDef
+
+    parsed = [EnrichmentDef(**e) if isinstance(e, dict) else e for e in enrichments]
+
+    meta = _get_source_dataset(source_dataset_id)
+    if not meta:
+        raise ValueError(f"Dataset '{source_dataset_id}' not found")
+
+    table_name = validate_table_name(meta["table_name"])
+    ticker_col = validate_column_name(ticker_column)
+    db = DuckDBManager.get_instance()
+
+    tickers = [
+        r[0]
+        for r in db.execute(
+            f'SELECT DISTINCT "{ticker_col}" FROM "{table_name}"'
+        ).fetchall()
+        if r[0]
+    ]
+
+    lookup: dict[str, dict] = {}
+    for symbol in tickers:
+        try:
+            lookup[symbol] = get_quote(symbol)
+        except ValueError:
+            logger.warning("Skipping ticker '%s' during enrich", symbol)
+            continue
+
+    enrich_cols = [validate_column_name(e.field_name) for e in parsed]
+    source_cols = [
+        desc[0]
+        for desc in db.execute(f'SELECT * FROM "{table_name}" LIMIT 0').description
+    ]
+    all_cols = source_cols + enrich_cols
+
+    dataset_id = str(uuid.uuid4())
+    result_table = f"dataset_{dataset_id}"
+    validate_table_name(result_table)
+
+    col_defs = ", ".join(f'"{c}" VARCHAR' for c in all_cols)
+    db.execute(f'CREATE TABLE "{result_table}" ({col_defs})')
+
+    source_rows = db.execute(f'SELECT * FROM "{table_name}"').fetchall()
+
+    batch: list[list] = []
+    for row in source_rows:
+        row_dict = dict(zip(source_cols, row, strict=True))
+        ticker = row_dict.get(ticker_col, "")
+        enrich_vals = lookup.get(ticker, {})
+        new_row = list(row) + [enrich_vals.get(e.field_name) for e in parsed]
+        batch.append(new_row)
+
+    placeholders = ", ".join("?" for _ in all_cols)
+    quoted_cols = ", ".join(f'"{c}"' for c in all_cols)
+    db.get_connection().executemany(
+        f'INSERT INTO "{result_table}" ({quoted_cols}) VALUES ({placeholders})',
+        batch,
+    )
+
+    count_row = db.execute(f'SELECT COUNT(*) FROM "{result_table}"').fetchone()
+    row_count = count_row[0] if count_row else len(batch)
+    columns_json = json.dumps(all_cols)
+
+    dataset_name = name or f"Enriched {meta['name']}"
+    db.execute(
+        "INSERT INTO metadata_datasets (dataset_id, run_id, name, table_name, columns_json, row_count, homogeneity, seed) VALUES (?, NULL, ?, ?, ?, ?, NULL, NULL)",
+        [dataset_id, dataset_name, result_table, columns_json, row_count],
+    )
+
+    from app.schemas.financial import EnrichResponse
+
+    return EnrichResponse(
+        dataset_id=dataset_id,
+        name=dataset_name,
+        table_name=result_table,
+        row_count=row_count,
+        columns=all_cols,
+        source_dataset=source_dataset_id,
+    )
+
+
+def _get_source_dataset(dataset_id: str) -> dict | None:
+    from app.services.dataset_service import get_dataset
+
+    return get_dataset(dataset_id)

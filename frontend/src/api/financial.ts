@@ -1,4 +1,17 @@
 import type { Quote, HistoryRecord, BatchRequest, DatasetResult } from "../types/financial";
+import type { TransformResponse } from "../types/transform";
+
+export interface EnrichmentDef {
+  field_name: string;
+  source: "quote" | "info";
+}
+
+export interface EnrichRequest {
+  source_dataset_id: string;
+  ticker_column: string;
+  enrichments: EnrichmentDef[];
+  name?: string;
+}
 
 export async function fetchQuote(symbol: string): Promise<Quote> {
   const res = await fetch(`/api/financial/quote?symbol=${encodeURIComponent(symbol)}`);
@@ -20,6 +33,19 @@ export async function fetchHistory(
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(err.detail || "Failed to fetch history");
+  }
+  return res.json();
+}
+
+export async function enrichDataset(body: EnrichRequest): Promise<TransformResponse> {
+  const res = await fetch("/api/financial/enrich", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Enrich failed" }));
+    throw new Error(err.detail);
   }
   return res.json();
 }

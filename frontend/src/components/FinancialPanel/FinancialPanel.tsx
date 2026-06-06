@@ -3,7 +3,10 @@ import { useState } from "react";
 import {
   CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
-import { fetchQuote, fetchHistory, batchFetchToDataset } from "../../api/financial";
+import { fetchQuote, fetchHistory, batchFetchToDataset, enrichDataset } from "../../api/financial";
+import { fetchDatasets, fetchDatasetColumns } from "../../api/datasets";
+import type { DatasetMeta } from "../../types/dataset";
+import type { ColumnInfo } from "../../types/dataset";
 
 function formatNumber(n: number): string {
   return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -17,14 +20,31 @@ function formatMarketCap(n: number | null): string {
   return `$${formatNumber(n)}`;
 }
 
+const INTERVALS = [
+  { value: "1m", label: "1 Minute" },
+  { value: "5m", label: "5 Minutes" },
+  { value: "15m", label: "15 Minutes" },
+  { value: "30m", label: "30 Minutes" },
+  { value: "60m", label: "60 Minutes" },
+  { value: "1d", label: "1 Day" },
+  { value: "5d", label: "5 Days" },
+  { value: "1wk", label: "1 Week" },
+  { value: "1mo", label: "1 Month" },
+];
+
 export function FinancialPanel({ onNavigate }: { onNavigate?: (page: string) => void }) {
   const [symbol, setSymbol] = useState("");
   const [input, setInput] = useState("");
   const [period, setPeriod] = useState("1mo");
-  const [intervalStr] = useState("1d");
+  const [interval, setInterval] = useState("1d");
 
   const [batchInput, setBatchInput] = useState("AAPL, MSFT, GOOG, AMZN, TSLA");
   const [batchName, setBatchName] = useState("");
+
+  const [enrichDatasetId, setEnrichDatasetId] = useState("");
+  const [enrichTickerCol, setEnrichTickerCol] = useState("");
+  const [enrichName, setEnrichName] = useState("");
+  const [enrichSelections, setEnrichSelections] = useState<Record<string, boolean>>({});
 
   const quote = useQuery({
     queryKey: ["financial", "quote", symbol],
@@ -33,14 +53,43 @@ export function FinancialPanel({ onNavigate }: { onNavigate?: (page: string) => 
   });
 
   const history = useQuery({
-    queryKey: ["financial", "history", symbol, period, intervalStr],
-    queryFn: () => fetchHistory(symbol, period, intervalStr),
+    queryKey: ["financial", "history", symbol, period, interval],
+    queryFn: () => fetchHistory(symbol, period, interval),
     enabled: !!symbol,
   });
 
   const batchMut = useMutation({
     mutationFn: batchFetchToDataset,
   });
+
+  const datasetsQuery = useQuery({
+    queryKey: ["datasets"],
+    queryFn: fetchDatasets,
+  });
+
+  const columnsQuery = useQuery({
+    queryKey: ["dataset-columns", enrichDatasetId],
+    queryFn: () => fetchDatasetColumns(enrichDatasetId),
+    enabled: !!enrichDatasetId,
+  });
+
+  const enrichMut = useMutation({
+    mutationFn: enrichDataset,
+  });
+
+  const ENRICHMENT_OPTIONS = [
+    { field_name: "regularMarketPrice", label: "Price" },
+    { field_name: "change", label: "Change" },
+    { field_name: "changePercent", label: "Change %" },
+    { field_name: "previousClose", label: "Previous Close" },
+    { field_name: "dayHigh", label: "Day High" },
+    { field_name: "dayLow", label: "Day Low" },
+    { field_name: "volume", label: "Volume" },
+    { field_name: "marketCap", label: "Market Cap" },
+    { field_name: "currency", label: "Currency" },
+    { field_name: "shortName", label: "Short Name" },
+    { field_name: "longName", label: "Long Name" },
+  ];
 
   const periods = [
     { label: "1D", value: "1d" },
@@ -142,20 +191,31 @@ export function FinancialPanel({ onNavigate }: { onNavigate?: (page: string) => 
             <h3 className="text-sm font-semibold text-[var(--muted)] uppercase tracking-wider">
               Price History
             </h3>
-            <div className="flex gap-1">
-              {periods.map((p) => (
-                <button
-                  key={p.value}
-                  onClick={() => setPeriod(p.value)}
-                  className={`text-xs px-2 py-1 rounded transition-colors ${
-                    period === p.value
-                      ? "bg-[var(--selection)] text-[var(--accent)]"
-                      : "text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--elevated)]"
-                  }`}
-                >
-                  {p.label}
-                </button>
-              ))}
+            <div className="flex items-center gap-3">
+              <select
+                value={interval}
+                onChange={(e) => setInterval(e.target.value)}
+                className="bg-[var(--elevated)] text-[var(--text)] border border-[var(--border)] rounded px-2 py-1 text-xs"
+              >
+                {INTERVALS.map((i) => (
+                  <option key={i.value} value={i.value}>{i.label}</option>
+                ))}
+              </select>
+              <div className="flex gap-1">
+                {periods.map((p) => (
+                  <button
+                    key={p.value}
+                    onClick={() => setPeriod(p.value)}
+                    className={`text-xs px-2 py-1 rounded transition-colors ${
+                      period === p.value
+                        ? "bg-[var(--selection)] text-[var(--accent)]"
+                        : "text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--elevated)]"
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
           <ResponsiveContainer width="100%" height={300}>
@@ -278,6 +338,125 @@ export function FinancialPanel({ onNavigate }: { onNavigate?: (page: string) => 
             </button>
           </div>
         )}
+      </div>
+
+      {/* Enrich dataset section */}
+      <div className="border-t border-[var(--border)] pt-6 mt-2">
+        <h3 className="text-sm font-semibold text-[var(--muted)] uppercase tracking-wider mb-3">
+          Enrich Dataset
+        </h3>
+        <div className="flex flex-col gap-3">
+          <div className="flex gap-4">
+            <div className="flex-1 flex flex-col gap-2">
+              <select
+                value={enrichDatasetId}
+                onChange={(e) => {
+                  setEnrichDatasetId(e.target.value);
+                  setEnrichTickerCol("");
+                  setEnrichSelections({});
+                }}
+                className="bg-[var(--elevated)] border border-[var(--border)] rounded px-3 py-2 text-sm text-[var(--text)]"
+              >
+                <option value="">Select dataset…</option>
+                {datasetsQuery.data?.map((d: DatasetMeta) => (
+                  <option key={d.dataset_id} value={d.dataset_id}>
+                    {d.name}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={enrichTickerCol}
+                onChange={(e) => setEnrichTickerCol(e.target.value)}
+                disabled={!columnsQuery.data?.length}
+                className="bg-[var(--elevated)] border border-[var(--border)] rounded px-3 py-2 text-sm text-[var(--text)] disabled:opacity-50"
+              >
+                <option value="">Ticker column…</option>
+                {columnsQuery.data?.map((c: ColumnInfo) => (
+                  <option key={c.name} value={c.name}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+
+              <input
+                value={enrichName}
+                onChange={(e) => setEnrichName(e.target.value)}
+                placeholder="Result name (optional)"
+                className="bg-[var(--elevated)] border border-[var(--border)] rounded px-3 py-2 text-sm text-[var(--text)] placeholder:text-[var(--muted)] focus:outline-none focus:border-cyan-700"
+              />
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-3">
+            {ENRICHMENT_OPTIONS.map((opt) => (
+              <label
+                key={opt.field_name}
+                className="flex items-center gap-1.5 text-sm text-[var(--text)] cursor-pointer"
+              >
+                <input
+                  type="checkbox"
+                  checked={!!enrichSelections[opt.field_name]}
+                  onChange={(e) =>
+                    setEnrichSelections((prev) => ({
+                      ...prev,
+                      [opt.field_name]: e.target.checked,
+                    }))
+                  }
+                  className="accent-[var(--accent)]"
+                />
+                {opt.label}
+              </label>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => {
+                const selected = ENRICHMENT_OPTIONS.filter(
+                  (o) => enrichSelections[o.field_name]
+                ).map((o) => ({ field_name: o.field_name, source: "quote" as const }));
+                if (!enrichDatasetId || !enrichTickerCol || selected.length === 0) return;
+                enrichMut.mutate({
+                  source_dataset_id: enrichDatasetId,
+                  ticker_column: enrichTickerCol,
+                  enrichments: selected,
+                  name: enrichName || undefined,
+                });
+              }}
+              disabled={
+                enrichMut.isPending ||
+                !enrichDatasetId ||
+                !enrichTickerCol ||
+                !Object.values(enrichSelections).some(Boolean)
+              }
+              className="px-4 py-2 bg-[var(--accent)] hover:bg-[var(--accent)] disabled:bg-[var(--elevated)] disabled:text-[var(--muted)] text-white text-sm rounded transition-colors"
+            >
+              {enrichMut.isPending ? "Enriching..." : "Enrich"}
+            </button>
+            {enrichMut.isPending && (
+              <span className="text-[var(--muted)] text-sm">Fetching quotes…</span>
+            )}
+          </div>
+
+          {enrichMut.error && (
+            <p className="text-sm text-[var(--red)]">{enrichMut.error.message}</p>
+          )}
+
+          {enrichMut.data && (
+            <div className="border border-[var(--accent)] rounded p-4 bg-[var(--selection)]">
+              <p className="text-sm text-[var(--accent)]">
+                Enriched dataset: <strong>{enrichMut.data.name}</strong> ({enrichMut.data.row_count} rows, {enrichMut.data.columns.length} cols)
+              </p>
+              <button
+                onClick={() => onNavigate?.("datasets")}
+                className="mt-2 px-3 py-1 text-xs bg-[var(--accent)] hover:bg-[var(--accent)] rounded transition-colors"
+              >
+                View in Datasets
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

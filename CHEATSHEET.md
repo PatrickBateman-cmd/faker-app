@@ -2,6 +2,8 @@
 
 All CLI commands run from `backend/` (`cd backend`).
 
+---
+
 ## Setup & Info
 
 ```sh
@@ -30,6 +32,19 @@ uv run faker generate --name "test" --rows 1000 --fields-file ./fields.json
 
 # Multi-dataset from JSON file
 uv run faker generate --datasets-file ./two_datasets.json
+
+# With null probability (5% NULL)
+uv run faker generate --name "sparse" --rows 100 --fields-json '
+[{"name":"name","generator":"name","type":"string","null_probability":0.05}]'
+
+# With weighted random elements
+uv run faker generate --name "weighted" --rows 100 --fields-json '
+[{"name":"status","generator":"random_element","type":"string","constraint":{"values":"active,pending,closed","weights":"60,30,10"}}]'
+
+# With condition (field only generated if condition is true)
+uv run faker generate --name "conditional" --rows 100 --fields-json '
+[{"name":"age","generator":"random_int","type":"integer","constraint":{"min":0,"max":120}},
+ {"name":"license_number","generator":"bothify","type":"string","condition":"age >= 16"}]'
 
 # With seed (deterministic)
 uv run faker generate --name "fixed" --rows 100 --template Person --seed 42
@@ -61,11 +76,17 @@ uv run faker datasets view <DATASET_ID> --page 2 --per-page 20
 uv run faker datasets export <DATASET_ID> csv
 uv run faker datasets export <DATASET_ID> csv --output ./my_data.csv
 
+# Export to JSON Lines
+uv run faker datasets export <DATASET_ID> jsonl --output ./data.jsonl
+
 # Export to Parquet
 uv run faker datasets export <DATASET_ID> parquet
 
 # Export to XLSX
 uv run faker datasets export <DATASET_ID> xlsx
+
+# Rename
+uv run faker datasets rename <DATASET_ID> --name "new_name"
 
 # Delete
 uv run faker datasets delete <DATASET_ID>
@@ -130,8 +151,9 @@ uv run faker financial history AAPL --period 1y --interval 1wk
 # Batch fetch → dataset
 uv run faker financial batch "AAPL,MSFT,GOOG"
 uv run faker financial batch "AAPL,MSFT,GOOG" --name "tech_quotes"
-# Then view:
-uv run faker datasets view <DATASET_ID>
+
+# Enrich existing dataset with financial data
+uv run faker financial enrich <DATASET_ID> --ticker-column symbol --enrich price,volume,market_cap
 ```
 
 ## Transform
@@ -164,11 +186,45 @@ uv run faker transform dedup <DATASET_ID> \
 
 ---
 
+## Tests
+
+```sh
+cd backend
+uv run pytest tests/ -v           # Run 40 backend tests
+
+cd frontend
+npx vitest run                    # Run 2 frontend tests
+npm run test                      # Alias for vitest run
+```
+
+---
+
+## Docker
+
+```sh
+docker compose up --build                # Start both services
+docker compose down                      # Stop
+```
+
+---
+
+## Shell Completion
+
+```sh
+uv run faker --install-completion   # Install tab completion
+uv run faker --show-completion      # Preview completion script
+```
+
+---
+
 ## Web API (curl) — server must be running
 
 ```sh
 # Health
 curl http://localhost:8000/health
+
+# Info
+curl http://localhost:8000/info
 
 # Generate
 curl -X POST http://localhost:8000/generate \
@@ -181,8 +237,19 @@ curl http://localhost:8000/datasets
 # View rows
 curl http://localhost:8000/datasets/<ID>/rows?page=1&per_page=10
 
+# View columns
+curl http://localhost:8000/datasets/<ID>/columns
+
+# Rename
+curl -X PATCH http://localhost:8000/datasets/<ID>/rename \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"new_name"}'
+
 # Export
 curl http://localhost:8000/datasets/<ID>/export/csv -o data.csv
+curl http://localhost:8000/datasets/<ID>/export/jsonl -o data.jsonl
+curl http://localhost:8000/datasets/<ID>/export/parquet -o data.parquet
+curl http://localhost:8000/datasets/<ID>/export/xlsx -o data.xlsx
 
 # Delete
 curl -X DELETE http://localhost:8000/datasets/<ID>
@@ -199,10 +266,18 @@ curl -X POST http://localhost:8000/iso20022/messages/pacs.008.001.12/save-templa
 # Financial quote
 curl "http://localhost:8000/financial/quote?ticker=AAPL"
 
+# Financial history
+curl "http://localhost:8000/financial/history?ticker=AAPL&period=3mo&interval=1d"
+
 # Financial batch
 curl -X POST http://localhost:8000/financial/batch-to-dataset \
   -H 'Content-Type: application/json' \
   -d '{"symbols":["AAPL","MSFT","GOOG"],"name":"quotes"}'
+
+# Financial enrich
+curl -X POST http://localhost:8000/financial/enrich \
+  -H 'Content-Type: application/json' \
+  -d '{"source_dataset_id":"<ID>","ticker_column":"symbol","enrichments":[{"field_name":"price","source":"quote"},{"field_name":"volume","source":"quote"}]}'
 
 # Aggregate
 curl -X POST http://localhost:8000/datasets/<ID>/aggregate \
@@ -213,4 +288,12 @@ curl -X POST http://localhost:8000/datasets/<ID>/aggregate \
 curl -X POST http://localhost:8000/datasets/<ID>/dedup \
   -H 'Content-Type: application/json' \
   -d '{"name":"unique","keys":["email"],"strategy":"keep_first"}'
+
+# Templates
+curl http://localhost:8000/templates
+curl http://localhost:8000/templates/Person
+curl -X POST http://localhost:8000/templates \
+  -H 'Content-Type: application/json' \
+  -d '{"xml_content":"<template name=\"Test\" category=\"Basic\"><field name=\"name\" generator=\"name\" type=\"string\"/></template>"}'
+curl -X DELETE http://localhost:8000/templates/Test
 ```

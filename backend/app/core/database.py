@@ -17,54 +17,19 @@ class DuckDBManager:
         db_file = Path(db_path) / "default_user.duckdb"
         self._conn = duckdb.connect(str(db_file))
         self._init_metadata_tables()
+        self._run_migrations()
 
     def _init_metadata_tables(self) -> None:
         self._conn.execute("""
-            CREATE SEQUENCE IF NOT EXISTS seq_run_id START 1
-        """)
-        self._conn.execute("""
-            CREATE TABLE IF NOT EXISTS metadata_templates (
-                name VARCHAR PRIMARY KEY,
-                category VARCHAR,
-                description VARCHAR,
-                xml_content VARCHAR,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            CREATE TABLE IF NOT EXISTS metadata_schema_version (
+                version VARCHAR PRIMARY KEY,
+                applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        self._conn.execute("""
-            CREATE TABLE IF NOT EXISTS metadata_runs (
-                run_id INTEGER PRIMARY KEY DEFAULT nextval('seq_run_id'),
-                name VARCHAR,
-                template_name VARCHAR,
-                row_count INTEGER,
-                homogeneity INTEGER,
-                seed INTEGER,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        self._conn.execute("""
-            CREATE TABLE IF NOT EXISTS metadata_aggregations (
-                id INTEGER PRIMARY KEY DEFAULT nextval('seq_run_id'),
-                source_dataset VARCHAR,
-                name VARCHAR,
-                config_json VARCHAR,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        self._conn.execute("""
-            CREATE TABLE IF NOT EXISTS metadata_datasets (
-                dataset_id VARCHAR PRIMARY KEY,
-                run_id INTEGER,
-                name VARCHAR,
-                table_name VARCHAR,
-                columns_json VARCHAR,
-                row_count INTEGER,
-                homogeneity INTEGER,
-                seed INTEGER,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
+
+    def _run_migrations(self) -> None:
+        from app.core.migrations import run_migrations
+        run_migrations(conn=self._conn)
 
     def execute(self, sql: str, params: list | None = None) -> duckdb.DuckDBPyConnection:
         with self._lock:

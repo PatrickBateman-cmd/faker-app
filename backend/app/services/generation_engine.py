@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import json
 import random
+import re
 import uuid
 from datetime import datetime, timedelta
+
+from jinja2 import Template as JinjaTemplate
 
 from faker import Faker
 
@@ -17,6 +20,42 @@ from app.schemas.generation import (
     GenerateRequest,
     GenerateResponse,
 )
+
+
+def _check_condition(condition: str, row: list, fields: list) -> bool:
+    if not condition:
+        return True
+    m = re.match(r'^\s*(\w+)\s*(>=|<=|!=|==|>|<)\s*(.+)\s*$', condition)
+    if not m:
+        return True
+    field_name, op, raw_val = m.group(1), m.group(2), m.group(3).strip()
+
+    field_indices = {f.name: i for i, f in enumerate(fields)}
+    if field_name not in field_indices:
+        return True
+
+    field_val = row[field_indices[field_name]]
+    if field_val is None:
+        return False
+
+    try:
+        val = int(raw_val) if raw_val.isdigit() else (float(raw_val) if '.' in raw_val else raw_val.strip('"').strip("'"))
+    except ValueError:
+        val = raw_val.strip('"').strip("'")
+
+    if op == ">=":
+        return field_val >= val
+    elif op == "<=":
+        return field_val <= val
+    elif op == ">":
+        return field_val > val
+    elif op == "<":
+        return field_val < val
+    elif op == "==":
+        return field_val == val
+    elif op == "!=":
+        return field_val != val
+    return True
 
 
 def _apply_constraint(fake: Faker, value: object, constraint: ConstraintConfig | None) -> object:
@@ -92,6 +131,9 @@ def _generate_field_value(fake: Faker, field: FieldDefinition, constraint: Const
     elif gen == "random_element":
         if cons and cons.values:
             vals = [v.strip() for v in cons.values.split(",")]
+            if cons.weights:
+                weights = [float(w.strip()) for w in cons.weights.split(",")]
+                return _apply_constraint(fake, random.choices(vals, weights=weights, k=1)[0], cons)
             return _apply_constraint(fake, fake.random_element(vals), cons)
         return _apply_constraint(fake, fake.word(), cons)
     elif gen == "currency_code":
@@ -191,13 +233,27 @@ def _generate_dataset(
         for row_idx in range(batch_start, batch_end):
             row: list = []
             for fi, field in enumerate(fields):
+                if field.null_probability and random.random() < field.null_probability:
+                    row.append(None)
+                    continue
+
+                if field.condition:
+                    if not _check_condition(field.condition, row, fields):
+                        row.append(None)
+                        continue
+
                 if field.generator == "shared_key" and shared_key_pool is not None:
                     val = random.choice(shared_key_pool) if shared_key_pool else None
                     row.append(val)
                     continue
 
                 if field.generator == "formula":
-                    row.append(field.formula)
+                    try:
+                        t = JinjaTemplate(field.formula or "")
+                        already = {f.name: row[idx] for idx, f in enumerate(fields[:fi])}
+                        row.append(t.render(**already))
+                    except Exception:
+                        row.append(field.formula or "")
                     continue
 
                 fk = field_fakers[fi] or fake

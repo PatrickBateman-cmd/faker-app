@@ -34,8 +34,17 @@ uv run faker datasets view <DATASET_ID> --page 1 --per-page 20
 # Export to CSV
 uv run faker datasets export <DATASET_ID> csv --output ./data.csv
 
+# Export to JSON Lines
+uv run faker datasets export <DATASET_ID> jsonl --output ./data.jsonl
+
+# Rename a dataset
+uv run faker datasets rename <DATASET_ID> --name "new_name"
+
 # Batch financial quotes → dataset
 uv run faker financial batch "AAPL,MSFT,GOOG" --name "tech_quotes"
+
+# Enrich an existing dataset with financial data
+uv run faker financial enrich <DATASET_ID> --ticker-column symbol --enrich price,volume,market_cap
 
 # ISO search + save as template
 uv run faker iso search pacs
@@ -50,13 +59,19 @@ uv run faker transform dedup <DATASET_ID> --name "unique" --keys "email"
 # All commands support --format json and --db <path>
 ```
 
+### Tests
+
+```sh
+cd backend && uv run pytest tests/ -v     # 40 backend tests
+cd frontend && npx vitest run             # 2 frontend tests
+```
+
 ## Gotchas
 
 - **Cold start**: yfinance takes ~5s to import. Wait after starting backend.
-- **Stale DB**: delete `backend/duckdb/default_user.duckdb` when schemas change. No migration system.
-- **No test suite exists**. `pytest` is an optional dev dep only.
-- **Frontend routing**: `useState<Page>` in `App.tsx`, no react-router. Add page as string literal to `Page` type + conditional render.
 - **No auth middleware**. All endpoints public. `AUTH_ENABLED` setting is declared but unimplemented.
+- **DuckDB single-writer**: can't query the `.duckdb` file while the server runs.
+- **Schema migrations**: handled automatically on startup by `app/core/migrations.py`. No manual `rm` needed.
 
 ## Architecture
 
@@ -64,13 +79,18 @@ uv run faker transform dedup <DATASET_ID> --name "unique" --keys "email"
 backend/cli/main.py              ← typer CLI entry point (8 command groups)
 backend/cli/common.py            ← Shared CLI state, DuckDB init, output helpers
 backend/cli/*.py                 ← Command groups: generate, datasets, templates, iso, financial, transform
-backend/app/main.py              ← FastAPI entry, registers 8 routers, global exception handler
+backend/app/main.py              ← FastAPI entry, registers routers, global exception handler
 backend/app/core/database.py     ← DuckDBManager singleton (thread-safe via Lock)
 backend/app/core/validation.py   ← validate_column_name() / validate_table_name()
+backend/app/core/migrations.py   ← Schema migration system (4 migrations)
 backend/app/config.py            ← Pydantic Settings from .env at repo root
 backend/app/routers/*.py         ← Each = APIRouter(prefix=..., tags=...)
 backend/app/services/*.py        ← Business logic
 backend/app/schemas/*.py         ← Pydantic models
+backend/tests/                   ← 40 pytest tests (8 test files + conftest)
+backend/Dockerfile               ← Python 3.14-slim production image
+frontend/Dockerfile              ← Multi-stage nginx production image
+docker-compose.yml               ← Backend + Frontend services
 ```
 
 Key service files: `generation_engine.py`, `dataset_service.py`, `transform_service.py` (aggregation+dedup), `export_service.py`, `template_library.py`, `iso20022_service.py`, `financial_service.py`.
@@ -78,30 +98,32 @@ Key service files: `generation_engine.py`, `dataset_service.py`, `transform_serv
 ## Backend conventions
 
 - DuckDBManager singleton — uses `threading.Lock` around `execute()` and `initialize()`. Use `db.get_connection().executemany(sql, batch)` for batch inserts.
-- Table names: `dataset_{8char_uuid}`. All table/column names are validated via `app.core.validation` before SQL interpolation.
+- Table names: `dataset_{uuid}`. All table/column names are validated via `app.core.validation` before SQL interpolation.
 - Field `type` in FieldDefinition maps: `integer`→BIGINT, `float`/`decimal`→DOUBLE, `boolean`→BOOLEAN, `date`→DATE, `datetime`/`timestamp`→TIMESTAMP, else VARCHAR.
 - `ConstraintConfig.values` is a **comma-separated string**, not a list.
 - Routers use `except ValueError` for 404s, broad `except Exception` for 500s. A global exception handler in `main.py` catches all unhandled errors returning 500.
 - Export temp files are cleaned up via `BackgroundTasks` after response.
 - `zip(columns, row, strict=True)` in `dataset_service.py` — will error loudly on schema mismatch.
+- Migrations auto-run on startup via `app/core/migrations.py`. Idempotent (`IF NOT EXISTS`).
 
 ## Frontend conventions
 
 ```sh
 npx tsc --noEmit                                  # typecheck only
 npm run build   # tsc -b && vite build            # full build
+npm run test    # vitest run                       # frontend tests
 ```
 
 - Components live in `src/components/<Name>/<Name>.tsx` with named exports.
 - API calls in `src/api/<name>.ts` using `fetch()` to `/api/*`.
 - Types in `src/types/<name>.ts`.
 - React Query (`@tanstack/react-query`) for server state. `refetchInterval: 30000` in ResultsViewer.
-- Charting: Recharts (line chart in FinancialPanel).
+- Charting: Recharts (line chart in FinancialPanel, bar/line/pie in DatasetChart).
 - Dataset list auto-refetches every 30s (background refetching disabled).
+- **Routing**: react-router-dom with `<Routes>` + `<Route>`. 6 pages: `/`, `/templates`, `/iso20022`, `/financial`, `/generation`, `/datasets`. No `useState<Page>`.
+- **Toasts**: `useToast()` hook + `<ToastContainer>` component replaces `alert()` calls.
 
 ## Refactoring completed (June 2026)
-
-Phases 1–4 are done. See `REFACTOR.md` for full details.
 
 | Area | What was fixed |
 |---|---|
@@ -121,51 +143,36 @@ Phases 1–4 are done. See `REFACTOR.md` for full details.
 | **Global error handler** | Catches all unhandled exceptions, logs, returns 500 |
 | **Frontend refetch** | Changed from 5s to 30s, background refetch disabled |
 | **Full UUIDs** | 8-char truncation removed, full 36-char UUIDs for dataset IDs |
-| **Export dropdown** | Hover → click-based toggle |
-| **Duplicated types** | `types/generation.ts` imports and re-exports from `types/template.ts` |
-| **Apply button** | TemplateLibrary Apply navigates to Generation with template loaded |
-| **Unused imports** | `useEffect` removed from AggregationPanel |
-| **Typed onResult** | `(result: unknown)` → `TransformResponse` type |
-| **Delete error UI** | `onError` handler with `alert()` added |
-| **Financial auto-fetch** | Default symbol removed, gated behind Search click |
-| **Health degraded** | Returns degraded status if DuckDB is down |
+| **Template caching** | File-mtime based cache in `template_library.py` |
+| **Schema migrations** | Auto-run on startup, version-tracked in `metadata_schema_version` |
+
+## Features implemented (July 2026)
+
+| Feature | What |
+|---|---|
+| **Formula evaluation** | `generator="formula"` fields evaluate Jinja2 templates with cross-field references (e.g. `{{first_name|lower}}.{{last_name|lower}}@example.com`) |
+| **Null probability** | Field-level `null_probability: 0.05` causes ~5% of values to be NULL |
+| **Weighted random elements** | `constraint weights="10,30,50,10"` controls distribution in `random_element` |
+| **Conditional generation** | `condition: "age >= 18"` skips fields when condition is false |
+| **Financial enrich** | `POST /financial/enrich` joins yfinance data against existing datasets |
+| **Offline ISO cache** | ISO domains/messages/XSDs cached in DuckDB (1h TTL) for offline browsing |
+| **Dataset charting** | Bar/line/pie charts for any dataset's numeric columns |
+| **Dataset rename** | `PATCH /datasets/{id}/rename` + CLI `faker datasets rename` |
+| **JSON Lines export** | `jsonl` format alongside CSV/Parquet/XLSX |
+| **Database migrations** | Auto-applied on startup, version-tracked |
+| **Toast notifications** | Replace `alert()` with auto-dismissing toasts |
+| **Dashboard redesign** | Stats cards + recent datasets + quick actions |
+| **Field drag & drop** | Reorder fields in Data Definition Pane |
+| **Financial interval selector** | Period + interval dropdowns in Financial Panel |
+| **React-router** | URL-based navigation with `/datasets/:id` deep-linking |
+| **Docker Compose** | Production deployment with nginx reverse proxy |
+| **Backend test suite** | 40 pytest tests covering all services + API |
+| **Frontend test suite** | 2 vitest smoke tests |
 
 ## Remaining known issues
 
-- Export dropdown click toggle could be improved (closes on blur with 200ms delay)
-- Financial panel interval is hardcoded to 1d (no UI to change)
-- Auth settings declared but not implemented
-
-## Feature plan (appended June 2026)
-
-### ISO 20022 Search
-- `GET /iso20022/search?q=...` searches across all messages by short code (message_id) or full name (message_name)
-- Backend: `search_messages(q)` in `iso20022_service.py` — fetches all domains' messages, filters case-insensitive substring match
-- Frontend: Search input in `Iso20022Panel.tsx` with 300ms debounce, results shown in message column, ✕ to clear
-- API function: `searchMessages(q)` in `api/iso20022.ts`
-
-### Financial Batch → Dataset
-- `POST /financial/batch-to-dataset` accepts `{"symbols": [...], "name": "..."}` (max 50 symbols)
-- Backend: `batch_to_dataset()` in `financial_service.py` — fetches quotes for all symbols, creates DuckDB table, registers in metadata_datasets
-- Frontend: Batch textarea + "Fetch & Save" button in `FinancialPanel.tsx`, result links to Datasets page
-- Dataset columns: `symbol, shortName, longName, regularMarketPrice, previousClose, change, changePercent, dayHigh, dayLow, volume, marketCap, currency`
-- Works with existing ResultsViewer (view, export, aggregate, dedup)
-
-### Catppuccin Theme + JetBrains Mono
-- 4 Catppuccin variants: Mocha (default dark), Macchiato, Frappé, Latte
-- CSS custom properties in `index.css` for `--bg`, `--surface`, `--elevated`, `--border`, `--text`, `--muted`, `--accent`, `--green`, `--red`, `--selection`
-- `ThemeSwitcher` component renders in sidebar, persists to localStorage
-- All components use `bg-[var(--...)]` / `text-[var(--...)]` etc.
-- JetBrains Mono loaded via Google Fonts, set as `font-family` on `:root`
-
-### ISO → Template ("Save as Template")
-- "Save as Template" button in `Iso20022Panel` XSD detail area (right column)
-- On click: flattens `ParsedField[]` with `parent.child` dot notation for nested fields, maps `xsd_type` → `type` (decimal→float, integer→integer, date→date, boolean→boolean, else string), places `enumeration_values` into `<constraint values="..."/>`
-- Constructs XML with `template name="{messageId} - {messageName}" category="ISO 20022"` and calls `POST /templates`
-- On success, calls `onApply(templateName)` → user lands on Generation page with all ISO-derived fields pre-loaded
-- Template persists in `backend/app/templates/*.xml`, appears in Template Library on future visits
-- Creating the same ISO template twice returns HTTP 409 (Conflict)
-- Uses `createTemplate()` from `api/templates.ts`; `onApply` prop added to `Iso20022Panel` in `App.tsx`
-
-### Theme Switcher (rendering fix)
-- `ThemeSwitcher` component existed but was never imported/rendered — added `import` + `<ThemeSwitcher />` inside `<aside>` sidebar after navigation in `App.tsx`
+- Auth settings declared but not implemented (`AUTH_ENABLED`, JWT middleware)
+- Export dropdown click toggle closes on blur with 200ms delay
+- Financial panel does not cache historical data across page navigations
+- Some XSD `<xs:include>` / `<xs:import>` directives are ignored (nested types limited)
+- No frontend test coverage for components beyond ThemeSwitcher

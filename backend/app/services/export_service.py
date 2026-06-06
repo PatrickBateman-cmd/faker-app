@@ -49,6 +49,21 @@ def export_parquet(dataset_id: str) -> str:
     return filepath
 
 
+def export_jsonl(dataset_id: str) -> str:
+    meta = get_dataset(dataset_id)
+    if not meta:
+        raise ValueError(f"Dataset '{dataset_id}' not found")
+    table_name = validate_table_name(meta["table_name"])
+    safe_name = _sanitize_filename(meta["name"])
+    filename = f"{safe_name}_{dataset_id}.jsonl"
+    filepath = os.path.join(_get_export_dir(), filename)
+    db = DuckDBManager.get_instance()
+    db.execute(
+        f"""COPY "{table_name}" TO '{filepath}' (FORMAT JSON)"""
+    )
+    return filepath
+
+
 def export_xlsx(dataset_id: str) -> str:
     meta = get_dataset(dataset_id)
     if not meta:

@@ -19,7 +19,8 @@
   <field name="street_address" type="string" generator="street_address"/>
   <field name="zip_code" type="string" generator="zipcode"/>
   <field name="phone" type="string" generator="phone_number"/>
-  <field name="website" type="string" generator="url"/>
+  <field name="website" type="string" generator="formula"
+         formula="https://www.{{ name|lower|replace(' ', '') }}.com"/>
   <field name="is_public" type="boolean" generator="boolean"/>
   <field name="revenue_range" type="string" generator="random_element">
     <constraint values="&lt;1M,1M-10M,10M-100M,100M-1B,&gt;1B"/>

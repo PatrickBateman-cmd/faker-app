@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { TransformResponse } from "../../types/transform";
+import { useToast } from "../../hooks/useToast";
 
 interface Props {
   datasetId: string;
@@ -14,6 +15,7 @@ export default function DedupPanel({
   onResult,
   onBack,
 }: Props) {
+  const { addToast } = useToast();
   const [name, setName] = useState("");
   const [keys, setKeys] = useState<string[]>([]);
   const [strategy, setStrategy] = useState("keep_first");
@@ -67,8 +69,11 @@ export default function DedupPanel({
       }
       const result = await res.json();
       onResult(result);
+      addToast("Dedup completed", "success");
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Unknown error");
+      const msg = e instanceof Error ? e.message : "Unknown error";
+      setError(msg);
+      addToast(msg, "error");
     } finally {
       setLoading(false);
     }

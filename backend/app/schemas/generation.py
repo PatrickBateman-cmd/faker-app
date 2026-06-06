@@ -7,6 +7,7 @@ class ConstraintConfig(BaseModel):
     min_age: int | None = None
     max_age: int | None = None
     values: str | None = None
+    weights: str | None = None
     right_digits: int | None = None
     format: str | None = None
     start: str | None = None
@@ -19,7 +20,9 @@ class FieldDefinition(BaseModel):
     type: str = "string"
     unique: bool = False
     formula: str | None = None
+    null_probability: float | None = None
     constraint: ConstraintConfig | None = None
+    condition: str | None = None
 
 
 class SharedKeyConfig(BaseModel):

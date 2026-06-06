@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Body, HTTPException, Query
 
+from app.schemas.financial import EnrichRequest, EnrichResponse
 from app.schemas.generation import DatasetResult
 from app.services import financial_service
 
@@ -41,6 +42,21 @@ async def batch_to_dataset(
         raise HTTPException(status_code=422, detail="Maximum 50 symbols per batch")
     try:
         return financial_service.batch_to_dataset(symbols, name=name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.post("/enrich")
+async def enrich(body: EnrichRequest) -> EnrichResponse:
+    try:
+        return financial_service.enrich_dataset(
+            source_dataset_id=body.source_dataset_id,
+            ticker_column=body.ticker_column,
+            enrichments=body.enrichments,
+            name=body.name,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:

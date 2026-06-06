@@ -88,6 +88,15 @@ def get_dataset_rows(
     }
 
 
+def rename_dataset(dataset_id: str, new_name: str) -> bool:
+    meta = get_dataset(dataset_id)
+    if not meta:
+        return False
+    db = DuckDBManager.get_instance()
+    db.execute("UPDATE metadata_datasets SET name = ? WHERE dataset_id = ?", [new_name, dataset_id])
+    return True
+
+
 def delete_dataset(dataset_id: str) -> bool:
     meta = get_dataset(dataset_id)
     if not meta:

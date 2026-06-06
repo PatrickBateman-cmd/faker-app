@@ -3,12 +3,15 @@ import { useState } from "react";
 import { deleteDataset, fetchDatasetRows, fetchDatasets } from "../../api/datasets";
 import AggregationPanel from "../AggregationPanel/AggregationPanel";
 import DedupPanel from "../DedupPanel/DedupPanel";
+import { DatasetChart } from "../DatasetChart/DatasetChart";
+import { useToast } from "../../hooks/useToast";
 
-export function ResultsViewer() {
+export function ResultsViewer({ preselectedDatasetId }: { preselectedDatasetId?: string }) {
+  const { addToast } = useToast();
   const queryClient = useQueryClient();
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(preselectedDatasetId ?? null);
   const [page, setPage] = useState(1);
-  const [mode, setMode] = useState<"data" | "aggregate" | "dedup">("data");
+  const [mode, setMode] = useState<"data" | "chart" | "aggregate" | "dedup">("data");
   const [exportOpen, setExportOpen] = useState(false);
 
   const list = useQuery({
@@ -36,7 +39,7 @@ export function ResultsViewer() {
       }
     },
     onError: (err) => {
-      alert(err instanceof Error ? err.message : "Delete failed");
+      addToast(err instanceof Error ? err.message : "Delete failed", "error");
     },
   });
 
@@ -96,7 +99,7 @@ export function ResultsViewer() {
           <div className="flex flex-col gap-4">
             {/* Tab bar */}
             <div className="flex gap-1 border-b border-[var(--border)]">
-              {(["data", "aggregate", "dedup"] as const).map((m) => (
+              {(["data", "chart", "aggregate", "dedup"] as const).map((m) => (
                 <button
                   key={m}
                   onClick={() => setMode(m)}
@@ -108,9 +111,11 @@ export function ResultsViewer() {
                 >
                   {m === "data"
                     ? "Data"
-                    : m === "aggregate"
-                      ? "Aggregate"
-                      : "Dedup"}
+                    : m === "chart"
+                      ? "Chart"
+                      : m === "aggregate"
+                        ? "Aggregate"
+                        : "Dedup"}
                 </button>
               ))}
             </div>
@@ -171,6 +176,14 @@ export function ResultsViewer() {
                             onClick={() => setExportOpen(false)}
                           >
                             XLSX
+                          </a>
+                          <a
+                            href={`/api/datasets/${selectedId}/export/jsonl`}
+                            download
+                            className="block px-4 py-2 text-xs text-[var(--text)] hover:bg-[var(--elevated)] whitespace-nowrap"
+                            onClick={() => setExportOpen(false)}
+                          >
+                            JSON Line
                           </a>
                         </div>
                       )}
@@ -247,6 +260,10 @@ export function ResultsViewer() {
                   </div>
                 )}
               </div>
+            )}
+
+            {mode === "chart" && (
+              <DatasetChart datasetId={selectedId} />
             )}
 
             {mode === "aggregate" && selectedMeta && (

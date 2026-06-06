@@ -1,3 +1,6 @@
+import { DndContext, closestCenter, type DragEndEvent } from "@dnd-kit/core";
+import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { fetchTemplate, fetchTemplates, generateDatasets } from "../../api/generation";
@@ -19,6 +22,59 @@ const GENERATOR_OPTIONS = [
 ];
 
 const TYPE_OPTIONS = ["string", "integer", "float", "boolean", "date"];
+
+const GENERATOR_OPTIONS_LIST = GENERATOR_OPTIONS;
+const TYPE_OPTIONS_LIST = TYPE_OPTIONS;
+
+function SortableFieldRow({
+  field, index, dsIndex, onChange, onRemove
+}: {
+  field: FieldDef;
+  index: number;
+  dsIndex: number;
+  onChange: (dsIndex: number, fieldIndex: number, updater: (f: FieldDef) => FieldDef) => void;
+  onRemove: (dsIndex: number, fieldIndex: number) => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: `field-${dsIndex}-${index}` });
+  const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1 };
+
+  return (
+    <div ref={setNodeRef} style={style} className="flex items-center gap-1 text-xs">
+      <button {...attributes} {...listeners} className="cursor-grab text-[var(--muted)] px-1">⠿</button>
+      <input
+        value={field.name}
+        onChange={(e) => onChange(dsIndex, index, (f) => ({ ...f, name: e.target.value }))}
+        className="w-24 bg-[var(--elevated)] border border-[var(--border)] rounded px-1.5 py-1 text-[var(--text)] placeholder:text-[var(--muted)] focus:outline-none focus:border-cyan-700"
+        placeholder="field_name"
+      />
+      <select
+        value={field.generator}
+        onChange={(e) => onChange(dsIndex, index, (f) => ({ ...f, generator: e.target.value }))}
+        className="w-28 bg-[var(--elevated)] border border-[var(--border)] rounded px-1.5 py-1 text-[var(--text)] focus:outline-none focus:border-cyan-700"
+      >
+        {GENERATOR_OPTIONS_LIST.map((g) => (
+          <option key={g} value={g}>{g}</option>
+        ))}
+      </select>
+      <select
+        value={field.type}
+        onChange={(e) => onChange(dsIndex, index, (f) => ({ ...f, type: e.target.value }))}
+        className="w-18 bg-[var(--elevated)] border border-[var(--border)] rounded px-1.5 py-1 text-[var(--muted)]"
+      >
+        {TYPE_OPTIONS_LIST.map((t) => (
+          <option key={t} value={t}>{t}</option>
+        ))}
+      </select>
+      <button
+        onClick={() => onRemove(dsIndex, index)}
+        className="text-[var(--muted)] hover:text-[var(--red)] px-1"
+        title="Remove field"
+      >
+        x
+      </button>
+    </div>
+  );
+}
 
 function emptyField(): FieldDef {
   return { name: "", generator: "text", type: "string", unique: false };
@@ -83,6 +139,13 @@ export function GenerationControls({ onNavigate, pendingTemplate: externalTempla
     updateDataset(dsIndex, (d) => ({
       ...d,
       fields: d.fields.filter((_, i) => i !== fieldIndex),
+    }));
+  }
+
+  function moveField(dsIndex: number, oldIndex: number, newIndex: number) {
+    updateDataset(dsIndex, (d) => ({
+      ...d,
+      fields: arrayMove(d.fields, oldIndex, newIndex),
     }));
   }
 
@@ -223,60 +286,27 @@ export function GenerationControls({ onNavigate, pendingTemplate: externalTempla
             </div>
 
             <div className="flex flex-col gap-1 overflow-y-auto max-h-80">
-              {ds.fields.map((field, fIndex) => (
-                <div key={fIndex} className="flex items-center gap-1 text-xs">
-                  <input
-                    value={field.name}
-                    onChange={(e) =>
-                      updateField(dsIndex, fIndex, (f) => ({
-                        ...f,
-                        name: e.target.value,
-                      }))
-                    }
-                    className="w-24 bg-[var(--elevated)] border border-[var(--border)] rounded px-1.5 py-1 text-[var(--text)] placeholder:text-[var(--muted)] focus:outline-none focus:border-cyan-700"
-                    placeholder="field_name"
-                  />
-                  <select
-                    value={field.generator}
-                    onChange={(e) =>
-                      updateField(dsIndex, fIndex, (f) => ({
-                        ...f,
-                        generator: e.target.value,
-                      }))
-                    }
-                    className="w-28 bg-[var(--elevated)] border border-[var(--border)] rounded px-1.5 py-1 text-[var(--text)] focus:outline-none focus:border-cyan-700"
-                  >
-                    {GENERATOR_OPTIONS.map((g) => (
-                      <option key={g} value={g}>
-                        {g}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    value={field.type}
-                    onChange={(e) =>
-                      updateField(dsIndex, fIndex, (f) => ({
-                        ...f,
-                        type: e.target.value,
-                      }))
-                    }
-                    className="w-18 bg-[var(--elevated)] border border-[var(--border)] rounded px-1.5 py-1 text-[var(--muted)]"
-                  >
-                    {TYPE_OPTIONS.map((t) => (
-                      <option key={t} value={t}>
-                        {t}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    onClick={() => removeField(dsIndex, fIndex)}
-                    className="text-[var(--muted)] hover:text-[var(--red)] px-1"
-                    title="Remove field"
-                  >
-                    x
-                  </button>
-                </div>
-              ))}
+              <DndContext collisionDetection={closestCenter} onDragEnd={(e) => {
+                const { active, over } = e;
+                if (over && active.id !== over.id) {
+                  const oldIndex = parseInt(active.id.toString().split("-")[2]);
+                  const newIndex = parseInt(over.id.toString().split("-")[2]);
+                  moveField(dsIndex, oldIndex, newIndex);
+                }
+              }}>
+                <SortableContext items={ds.fields.map((_, i) => `field-${dsIndex}-${i}`)} strategy={verticalListSortingStrategy}>
+                  {ds.fields.map((field, fIndex) => (
+                    <SortableFieldRow
+                      key={`field-${dsIndex}-${fIndex}`}
+                      field={field}
+                      index={fIndex}
+                      dsIndex={dsIndex}
+                      onChange={updateField}
+                      onRemove={removeField}
+                    />
+                  ))}
+                </SortableContext>
+              </DndContext>
             </div>
 
             <button

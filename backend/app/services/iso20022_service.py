@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+import json
 import random
 import re
 import time
+from datetime import datetime, timedelta
 from functools import lru_cache
 from urllib.parse import urljoin
 
 import httpx
 from lxml import etree, html
 
+from app.core.database import DuckDBManager
 from app.schemas.iso20022 import DomainInfo, MessageInfo, ParsedField, XsdParsedResponse
+
+_CACHE_TTL_SECONDS = 3600
 
 CATALOG_BASE = "https://www.iso20022.org"
 CATALOG_URL = f"{CATALOG_BASE}/iso-20022-message-definitions"
@@ -104,12 +109,38 @@ def _fetch_page(url: str) -> str:
     return resp.text
 
 
+def _cache_get(key: str) -> str | None:
+    db = DuckDBManager.get_instance()
+    row = db.execute(
+        "SELECT data_json, fetched_at FROM metadata_iso_cache WHERE cache_key = ?",
+        [key],
+    ).fetchone()
+    if not row:
+        return None
+    data_json, fetched_at = row
+    age = (datetime.now() - fetched_at).total_seconds() if fetched_at else _CACHE_TTL_SECONDS + 1
+    if age > _CACHE_TTL_SECONDS:
+        return None
+    return data_json
+
+
+def _cache_set(key: str, data: object) -> None:
+    db = DuckDBManager.get_instance()
+    db.execute(
+        "INSERT OR REPLACE INTO metadata_iso_cache (cache_key, data_json, fetched_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
+        [key, json.dumps(data)],
+    )
+
+
 def _fetch_xsd(url: str) -> str:
     full_url = url if url.startswith("http") else urljoin(CATALOG_BASE, url)
     return _fetch_page(full_url)
 
 
 def get_domains() -> list[DomainInfo]:
+    cached = _cache_get("domains")
+    if cached:
+        return [DomainInfo(**d) for d in json.loads(cached)]
     try:
         raw = _fetch_page(CATALOG_URL)
     except httpx.TimeoutException:
@@ -129,7 +160,9 @@ def get_domains() -> list[DomainInfo]:
             m = re.search(r"business-domain%5B0%5D=(\d+)", href)
             if m:
                 domains.append(DomainInfo(id=m.group(1), name=name))
-    return domains if domains else _default_domains()
+    result = domains if domains else _default_domains()
+    _cache_set("domains", [d.model_dump() for d in result])
+    return result
 
 
 def _default_domains() -> list[DomainInfo]:
@@ -142,8 +175,12 @@ def _default_domains() -> list[DomainInfo]:
     ]
 
 
-@lru_cache(maxsize=64)
 def get_messages(domain_id: str | None = None, page: int = 0) -> list[MessageInfo]:
+    cache_key = f"messages:{domain_id or ''}:{page}"
+    cached = _cache_get(cache_key)
+    if cached:
+        return [MessageInfo(**m) for m in json.loads(cached)]
+
     params = f"?page={page}"
     if domain_id:
         params = f"?business-domain%5B0%5D={domain_id}&page={page}"
@@ -163,7 +200,9 @@ def get_messages(domain_id: str | None = None, page: int = 0) -> list[MessageInf
 
     sections = tree.xpath("//details | //div[contains(@class, 'views-row')]")
     if not sections:
-        return _parse_message_table_fallback(tree, domain_id)
+        result = _parse_message_table_fallback(tree, domain_id)
+        _cache_set(cache_key, [m.model_dump() for m in result])
+        return result
 
     for section in sections:
         title_el = section.xpath(".//summary | .//h3 | .//h4")
@@ -192,6 +231,7 @@ def get_messages(domain_id: str | None = None, page: int = 0) -> list[MessageInf
                     )
                 )
 
+    _cache_set(cache_key, [m.model_dump() for m in messages])
     return messages
 
 
@@ -453,40 +493,54 @@ def _parse_nested_fields(elem: etree._Element, root: etree._Element, nsmap: dict
 
 
 def parse_xsd_for_message(message_id: str) -> XsdParsedResponse:
+    cached = _cache_get(f"xsd:{message_id}")
+    if cached:
+        return XsdParsedResponse(**json.loads(cached))
+
     msg = get_message_by_id(message_id)
     message_name = msg.message_name if msg else message_id
     xsd_url = msg.xsd_url if msg and msg.xsd_url else ""
 
     if not xsd_url:
-        return XsdParsedResponse(
+        result = XsdParsedResponse(
             message_id=message_id,
             message_name=message_name,
             fields=_generate_demo_fields(),
         )
+        _cache_set(f"xsd:{message_id}", result.model_dump())
+        return result
 
     try:
         xsd_content = _fetch_xsd(xsd_url)
     except (httpx.TimeoutException, httpx.HTTPError):
-        return XsdParsedResponse(
+        result = XsdParsedResponse(
             message_id=message_id,
             message_name=message_name,
             fields=_generate_demo_fields(),
         )
+        _cache_set(f"xsd:{message_id}", result.model_dump())
+        return result
 
     try:
         result = _parse_xsd_fields(xsd_content, message_id, message_name)
     except etree.XMLSyntaxError:
-        return XsdParsedResponse(
+        result = XsdParsedResponse(
+            message_id=message_id,
+            message_name=message_name,
+            fields=_generate_demo_fields(),
+        )
+        _cache_set(f"xsd:{message_id}", result.model_dump())
+        return result
+
+    if not result.fields:
+        result = XsdParsedResponse(
             message_id=message_id,
             message_name=message_name,
             fields=_generate_demo_fields(),
         )
 
-    return result if result.fields else XsdParsedResponse(
-        message_id=message_id,
-        message_name=message_name,
-        fields=_generate_demo_fields(),
-    )
+    _cache_set(f"xsd:{message_id}", result.model_dump())
+    return result
 
 
 def _generate_demo_fields() -> list[ParsedField]:
@@ -507,10 +561,6 @@ def _generate_demo_fields() -> list[ParsedField]:
         ParsedField(name="RemittanceInfo", xsd_type="Max140Text", mapped_generator="text", min_occurs=0, max_occurs="1", documentation="Unstructured remittance information"),
         ParsedField(name="Country", xsd_type="CountryCode", mapped_generator="country_code", min_occurs=1, max_occurs="1", enumeration_values=["DE", "FR", "GB", "IT", "ES", "NL", "BE", "AT", "CH"]),
     ]
-
-
-def _cache_clear():
-    get_messages.cache_clear()
 
 
 def generate_from_xsd(message_id: str) -> list[dict]:

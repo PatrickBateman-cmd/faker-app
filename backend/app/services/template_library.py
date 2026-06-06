@@ -17,6 +17,8 @@ from app.schemas.template import (
 
 TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 
+_cache: dict[str, tuple[float, list[Template]]] = {}
+
 
 def _parse_field(element: ET.Element) -> FieldDef:
     constraint_elem = element.find("constraint")
@@ -28,6 +30,7 @@ def _parse_field(element: ET.Element) -> FieldDef:
             min_age=_safe_int(constraint_elem.get("min_age")),
             max_age=_safe_int(constraint_elem.get("max_age")),
             values=constraint_elem.get("values"),
+            weights=constraint_elem.get("weights"),
             right_digits=_safe_int(constraint_elem.get("right_digits")),
             format=constraint_elem.get("format"),
             start=constraint_elem.get("start"),
@@ -39,7 +42,9 @@ def _parse_field(element: ET.Element) -> FieldDef:
         generator=element.get("generator", "text"),
         unique=element.get("unique", "false").lower() == "true",
         formula=element.get("formula"),
+        null_probability=_safe_float(element.get("null_probability")),
         constraint=constraint,
+        condition=element.get("if"),
     )
 
 
@@ -92,8 +97,18 @@ def _parse_template_xml(xml_content: str) -> Template:
 
 
 def _load_templates_from_disk() -> list[Template]:
+    cached = _cache.get("templates")
+    if cached is not None:
+        cached_mtime, cached_templates = cached
+        try:
+            current_mtime = os.path.getmtime(TEMPLATES_DIR)
+        except OSError:
+            current_mtime = 0
+        if current_mtime == cached_mtime:
+            return cached_templates
     templates: list[Template] = []
     if not TEMPLATES_DIR.exists():
+        _cache["templates"] = (0, templates)
         return templates
     for file_path in sorted(TEMPLATES_DIR.iterdir()):
         if file_path.suffix.lower() != ".xml":
@@ -105,6 +120,11 @@ def _load_templates_from_disk() -> list[Template]:
         except ET.ParseError as e:
             msg = f"Failed to parse {file_path.name}: {e}"
             raise RuntimeError(msg) from e
+    try:
+        mtime = os.path.getmtime(TEMPLATES_DIR)
+    except OSError:
+        mtime = 0
+    _cache["templates"] = (mtime, templates)
     return templates
 
 
@@ -121,6 +141,7 @@ def _sync_to_duckdb(templates: list[Template]) -> None:
             [t.name, t.category, t.meta.description, ""],
         )
     db.execute("COMMIT")
+    _cache.clear()
 
 
 def list_templates() -> list[TemplateSummary]:
@@ -164,6 +185,7 @@ def create_template(xml_content: str) -> Template:
         raise ValueError(msg)
     file_path.write_text(xml_content, encoding="utf-8")
     _sync_to_duckdb(_load_templates_from_disk())
+    _cache.clear()
     return template
 
 
@@ -175,6 +197,7 @@ def update_template(name: str, xml_content: str) -> Template:
         old_path.unlink()
     new_path.write_text(xml_content, encoding="utf-8")
     _sync_to_duckdb(_load_templates_from_disk())
+    _cache.clear()
     return template
 
 
@@ -183,6 +206,7 @@ def delete_template(name: str) -> bool:
     if file_path:
         file_path.unlink()
         _sync_to_duckdb(_load_templates_from_disk())
+        _cache.clear()
         return True
     return False
 

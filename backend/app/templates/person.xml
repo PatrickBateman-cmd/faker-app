@@ -3,7 +3,8 @@
   <field name="id" type="integer" generator="uuid_int" unique="true"/>
   <field name="first_name" type="string" generator="first_name"/>
   <field name="last_name" type="string" generator="last_name"/>
-  <field name="email" type="string" generator="email"/>
+  <field name="email" type="string" generator="formula"
+         formula="{{ first_name|lower }}.{{ last_name|lower }}@example.com"/>
   <field name="phone" type="string" generator="phone_number"/>
   <field name="age" type="integer" generator="random_int">
     <constraint min="18" max="99"/>

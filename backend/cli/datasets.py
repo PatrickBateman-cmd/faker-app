@@ -4,8 +4,9 @@ from app.services.dataset_service import (
     delete_dataset as _delete,
     get_dataset_rows,
     list_datasets as _list,
+    rename_dataset as _rename,
 )
-from app.services.export_service import export_csv, export_parquet, export_xlsx
+from app.services.export_service import export_csv, export_jsonl, export_parquet, export_xlsx
 
 from cli.common import console, get_state, output_result
 
@@ -98,10 +99,26 @@ def delete_dataset(
         raise typer.Exit(code=1)
 
 
+@app.command(name="rename")
+def rename_dataset(
+    dataset_id: str = typer.Argument(..., help="Dataset ID"),
+    name: str = typer.Option(..., "--name", "-n", help="New dataset name"),
+    db: str = typer.Option(None, "--db", "-d", help="DuckDB path override"),
+) -> None:
+    """Rename a dataset."""
+    state = get_state()
+    state.ensure_db(db=db)
+    if _rename(dataset_id, name):
+        console.print(f"[green]Dataset renamed to '{name}'[/green]")
+    else:
+        console.print(f"[red]Error:[/red] Dataset '{dataset_id}' not found")
+        raise typer.Exit(code=1)
+
+
 @app.command(name="export")
 def export_dataset(
     dataset_id: str = typer.Argument(..., help="Dataset ID"),
-    format: str = typer.Argument("csv", help="Export format: csv, parquet, xlsx"),
+    format: str = typer.Argument("csv", help="Export format: csv, parquet, xlsx, jsonl"),
     output: str = typer.Option(None, "--output", "-o", help="Output file path"),
     db: str = typer.Option(None, "--db", "-d", help="DuckDB path override"),
 ) -> None:
@@ -109,14 +126,21 @@ def export_dataset(
     state = get_state()
     state.ensure_db(db=db)
 
-    fmt_map = {"csv": export_csv, "parquet": export_parquet, "xlsx": export_xlsx}
+    fmt_map = {"csv": export_csv, "parquet": export_parquet, "xlsx": export_xlsx, "jsonl": export_jsonl}
     exporter = fmt_map.get(format.lower())
     if not exporter:
-        console.print(f"[red]Error:[/red] Unsupported format '{format}'. Use csv, parquet, or xlsx")
+        console.print(f"[red]Error:[/red] Unsupported format '{format}'. Use csv, parquet, xlsx, or jsonl")
         raise typer.Exit(code=1)
 
     try:
-        filepath = exporter(dataset_id)
+        from rich.progress import Progress, SpinnerColumn, TextColumn
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+        ) as progress:
+            progress.add_task(description="Exporting...", total=None)
+            filepath = exporter(dataset_id)
     except ValueError as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(code=1) from e

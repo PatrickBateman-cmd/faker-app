@@ -1,6 +1,11 @@
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
 
 from app.services import dataset_service
+
+
+class RenameBody(BaseModel):
+    name: str
 
 router = APIRouter(prefix="/datasets", tags=["datasets"])
 
@@ -43,3 +48,10 @@ async def delete_dataset(dataset_id: str):
     deleted = dataset_service.delete_dataset(dataset_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Dataset not found")
+
+
+@router.patch("/{dataset_id}/rename")
+async def rename_dataset(dataset_id: str, body: RenameBody):
+    if not dataset_service.rename_dataset(dataset_id, body.name):
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    return {"status": "ok"}
