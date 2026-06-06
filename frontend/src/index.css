@@ -1,0 +1,56 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+@import "tailwindcss";
+
+:root {
+  font-family: 'JetBrains Mono', monospace;
+  --bg: #1e1e2e;
+  --surface: #181825;
+  --elevated: #313244;
+  --border: #45475a;
+  --text: #cdd6f4;
+  --muted: #6c7086;
+  --accent: #89b4fa;
+  --green: #a6e3a1;
+  --red: #f38ba8;
+  --selection: #45475a;
+}
+
+.theme-macchiato {
+  --bg: #24273a;
+  --surface: #1e2030;
+  --elevated: #363a4f;
+  --border: #494d64;
+  --text: #cad3f5;
+  --muted: #6e738d;
+  --accent: #8aadf4;
+  --green: #a6da95;
+  --red: #ed8796;
+  --selection: #494d64;
+}
+
+.theme-frappe {
+  --bg: #303446;
+  --surface: #292c3c;
+  --elevated: #414559;
+  --border: #51576d;
+  --text: #c6d0f5;
+  --muted: #737994;
+  --accent: #8caaee;
+  --green: #a6d189;
+  --red: #e78284;
+  --selection: #51576d;
+}
+
+.theme-latte {
+  --bg: #eff1f5;
+  --surface: #e6e9ef;
+  --elevated: #ccd0da;
+  --border: #bcc0cc;
+  --text: #4c4f69;
+  --muted: #9ca0b0;
+  --accent: #1e66f5;
+  --green: #40a02b;
+  --red: #d20f39;
+  --selection: #bcc0cc;
+}

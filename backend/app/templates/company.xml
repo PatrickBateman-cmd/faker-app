@@ -1,0 +1,27 @@
+<template name="Company" category="Business">
+  <meta description="Company profile with corporate details" version="1.0"/>
+  <field name="company_id" type="integer" generator="uuid_int" unique="true"/>
+  <field name="name" type="string" generator="company"/>
+  <field name="suffix" type="string" generator="company_suffix"/>
+  <field name="catch_phrase" type="string" generator="catch_phrase"/>
+  <field name="industry" type="string" generator="random_element">
+    <constraint values="Technology,Finance,Healthcare,Education,Manufacturing,Retail,Energy,Media,Transportation,Real Estate"/>
+  </field>
+  <field name="employee_count" type="integer" generator="random_int">
+    <constraint min="10" max="50000"/>
+  </field>
+  <field name="founding_year" type="integer" generator="random_int">
+    <constraint min="1950" max="2024"/>
+  </field>
+  <field name="email_domain" type="string" generator="domain_name"/>
+  <field name="country" type="string" generator="country"/>
+  <field name="city" type="string" generator="city"/>
+  <field name="street_address" type="string" generator="street_address"/>
+  <field name="zip_code" type="string" generator="zipcode"/>
+  <field name="phone" type="string" generator="phone_number"/>
+  <field name="website" type="string" generator="url"/>
+  <field name="is_public" type="boolean" generator="boolean"/>
+  <field name="revenue_range" type="string" generator="random_element">
+    <constraint values="&lt;1M,1M-10M,10M-100M,100M-1B,&gt;1B"/>
+  </field>
+</template>

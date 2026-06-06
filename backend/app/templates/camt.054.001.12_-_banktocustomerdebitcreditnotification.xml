@@ -1,0 +1,29 @@
+<template name="camt.054.001.12 - BankToCustomerDebitCreditNotification" category="ISO 20022">
+  <meta description="Generated from ISO 20022 message camt.054.001.12" version="1.0"/>
+
+  <field name="MessageId" type="string" generator="bothify"/>
+  <field name="CreationDateTime" type="date" generator="date_time"/>
+  <field name="NumberOfTransactions" type="string" generator="random_int"/>
+  <field name="TotalAmount" type="float" generator="pydecimal"/>
+  <field name="Currency" type="string" generator="currency_code">
+    <constraint values="EUR,USD,GBP,CHF,JPY"/>
+  </field>
+  <field name="Status" type="string" generator="random_element">
+    <constraint values="ACCC,ACSP,ACSC,ACCP,RJCT,PDNG"/>
+  </field>
+  <field name="DebtorName" type="string" generator="name"/>
+  <field name="DebtorIBAN" type="string" generator="iban"/>
+  <field name="CreditorName" type="string" generator="name"/>
+  <field name="CreditorIBAN" type="string" generator="iban"/>
+  <field name="BIC" type="string" generator="swift"/>
+  <field name="ChargeBearer" type="string" generator="random_element">
+    <constraint values="DEBT,CRED,SHAR,SLEV"/>
+  </field>
+  <field name="Purpose" type="string" generator="random_element">
+    <constraint values="SALA,SUPP,TAXS,INTC,TRAD,CONS,GOVT"/>
+  </field>
+  <field name="RemittanceInfo" type="string" generator="text"/>
+  <field name="Country" type="string" generator="country_code">
+    <constraint values="DE,FR,GB,IT,ES,NL,BE,AT,CH"/>
+  </field>
+</template>

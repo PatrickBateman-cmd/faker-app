@@ -1,0 +1,33 @@
+<template name="Financial Transaction" category="Financial">
+  <meta description="Financial transaction record with payment and account details" version="1.0"/>
+  <field name="transaction_id" type="string" generator="uuid4" unique="true"/>
+  <field name="account_number" type="string" generator="bban"/>
+  <field name="iban" type="string" generator="iban"/>
+  <field name="swift_bic" type="string" generator="swift"/>
+  <field name="amount" type="float" generator="pydecimal">
+    <constraint min="0.01" max="999999.99" right_digits="2"/>
+  </field>
+  <field name="currency" type="string" generator="currency_code"/>
+  <field name="transaction_type" type="string" generator="random_element">
+    <constraint values="Credit,Debit,Transfer,Payment,Refund,Withdrawal,Deposit"/>
+  </field>
+  <field name="status" type="string" generator="random_element">
+    <constraint values="Completed,Pending,Failed,Cancelled,Hold"/>
+  </field>
+  <field name="sender_name" type="string" generator="name"/>
+  <field name="sender_country" type="string" generator="country"/>
+  <field name="receiver_name" type="string" generator="name"/>
+  <field name="receiver_country" type="string" generator="country"/>
+  <field name="reference" type="string" generator="bothify">
+    <constraint format="TXN-########"/>
+  </field>
+  <field name="transaction_date" type="date" generator="date_between">
+    <constraint start="-2y" end="today"/>
+  </field>
+  <field name="fee" type="float" generator="pydecimal">
+    <constraint min="0" max="50" right_digits="2"/>
+  </field>
+  <field name="channel" type="string" generator="random_element">
+    <constraint values="Online,Mobile App,Branch,ATM,API"/>
+  </field>
+</template>

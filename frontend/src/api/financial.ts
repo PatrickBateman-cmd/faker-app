@@ -1,0 +1,38 @@
+import type { Quote, HistoryRecord, BatchRequest, DatasetResult } from "../types/financial";
+
+export async function fetchQuote(symbol: string): Promise<Quote> {
+  const res = await fetch(`/api/financial/quote?symbol=${encodeURIComponent(symbol)}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || "Failed to fetch quote");
+  }
+  return res.json();
+}
+
+export async function fetchHistory(
+  symbol: string,
+  period = "1mo",
+  interval = "1d"
+): Promise<HistoryRecord[]> {
+  const res = await fetch(
+    `/api/financial/history?symbol=${encodeURIComponent(symbol)}&period=${encodeURIComponent(period)}&interval=${encodeURIComponent(interval)}`
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || "Failed to fetch history");
+  }
+  return res.json();
+}
+
+export async function batchFetchToDataset(body: BatchRequest): Promise<DatasetResult> {
+  const res = await fetch("/api/financial/batch-to-dataset", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || "Batch fetch failed");
+  }
+  return res.json();
+}

@@ -1,0 +1,30 @@
+[project]
+name = "faker-app-backend"
+version = "0.1.0"
+description = "Faker App — synthetic dataset generator backend"
+requires-python = ">=3.14"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.34.0",
+    "duckdb>=1.2.0",
+    "pydantic-settings>=2.7.0",
+    "httpx>=0.28.0",
+    "lxml>=5.3.0",
+    "faker>=37.0.0",
+    "yfinance>=1.4.1",
+    "openpyxl>=3.1.5",
+    "defusedxml>=0.7.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.25.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

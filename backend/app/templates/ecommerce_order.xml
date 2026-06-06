@@ -1,0 +1,37 @@
+<template name="E-Commerce Order" category="E-Commerce">
+  <meta description="E-commerce order with customer, product, and payment details" version="1.0"/>
+  <field name="order_id" type="string" generator="uuid4" unique="true"/>
+  <field name="customer_id" type="integer" generator="uuid_int"/>
+  <field name="customer_name" type="string" generator="name"/>
+  <field name="customer_email" type="string" generator="email"/>
+  <field name="product_name" type="string" generator="random_element">
+    <constraint values="Wireless Mouse,USB-C Hub,Laptop Stand,Mechanical Keyboard,27 Monitor,Noise Cancelling Headphones,Webcam 4K,External SSD 1TB,Portable Charger,Smart Desk Lamp"/>
+  </field>
+  <field name="product_category" type="string" generator="random_element">
+    <constraint values="Electronics,Accessories,Peripherals,Storage,Audio,Video"/>
+  </field>
+  <field name="quantity" type="integer" generator="random_int">
+    <constraint min="1" max="10"/>
+  </field>
+  <field name="unit_price" type="float" generator="pydecimal">
+    <constraint min="5" max="500" right_digits="2"/>
+  </field>
+  <field name="currency" type="string" generator="currency_code"/>
+  <field name="discount_percent" type="integer" generator="random_int">
+    <constraint min="0" max="30"/>
+  </field>
+  <field name="payment_method" type="string" generator="random_element">
+    <constraint values="Credit Card,PayPal,Apple Pay,Google Pay,Bank Transfer,Crypto"/>
+  </field>
+  <field name="shipping_country" type="string" generator="country"/>
+  <field name="shipping_city" type="string" generator="city"/>
+  <field name="shipping_address" type="string" generator="street_address"/>
+  <field name="order_date" type="date" generator="date_between">
+    <constraint start="-1y" end="today"/>
+  </field>
+  <field name="status" type="string" generator="random_element">
+    <constraint values="Pending,Processing,Shipped,Delivered,Cancelled,Refunded"/>
+  </field>
+  <field name="is_express_shipping" type="boolean" generator="boolean"/>
+  <relationship type="one_to_many" source="customer_id" target="orders"/>
+</template>

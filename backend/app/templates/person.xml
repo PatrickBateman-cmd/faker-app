@@ -1,0 +1,24 @@
+<template name="Person" category="Basic">
+  <meta description="Personal profile with name, contact, and demographics" version="1.0"/>
+  <field name="id" type="integer" generator="uuid_int" unique="true"/>
+  <field name="first_name" type="string" generator="first_name"/>
+  <field name="last_name" type="string" generator="last_name"/>
+  <field name="email" type="string" generator="email"/>
+  <field name="phone" type="string" generator="phone_number"/>
+  <field name="age" type="integer" generator="random_int">
+    <constraint min="18" max="99"/>
+  </field>
+  <field name="gender" type="string" generator="random_element">
+    <constraint values="Male,Female,Non-binary"/>
+  </field>
+  <field name="country" type="string" generator="country"/>
+  <field name="city" type="string" generator="city"/>
+  <field name="street_address" type="string" generator="street_address"/>
+  <field name="zip_code" type="string" generator="zipcode"/>
+  <field name="job" type="string" generator="job"/>
+  <field name="company" type="string" generator="company"/>
+  <field name="birth_date" type="date" generator="date_of_birth">
+    <constraint min_age="18" max_age="99"/>
+  </field>
+  <field name="is_verified" type="boolean" generator="boolean"/>
+</template>
