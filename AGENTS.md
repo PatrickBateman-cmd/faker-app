@@ -40,8 +40,11 @@ uv run faker datasets export <DATASET_ID> jsonl --output ./data.jsonl
 # Rename a dataset
 uv run faker datasets rename <DATASET_ID> --name "new_name"
 
-# Batch financial quotes → dataset
+# Batch financial quotes → dataset (snapshot: 1 row/symbol)
 uv run faker financial batch "AAPL,MSFT,GOOG" --name "tech_quotes"
+
+# Batch financial history → dataset (time series: many rows/symbol)
+uv run faker financial batch "AAPL,MSFT" --history --period 1mo --interval 1d --name "tech_history"
 
 # Enrich an existing dataset with financial data
 uv run faker financial enrich <DATASET_ID> --ticker-column symbol --enrich price,volume,market_cap

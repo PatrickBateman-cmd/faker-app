@@ -8,6 +8,7 @@ from app.schemas.generation import (
     DatasetDefinition,
     FieldDefinition,
     GenerateRequest,
+    GroupConfig,
 )
 from app.services.generation_engine import generate_datasets
 
@@ -34,6 +35,10 @@ def generate(
     datasets_count: int = typer.Option(1, "--datasets", "-D", help="Number of datasets to generate (1-4)", min=1, max=4),
     datasets_file: str = typer.Option(None, "--datasets-file", help="JSON file with multiple dataset definitions"),
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress progress bar"),
+    groups: int = typer.Option(None, "--groups", "-g", help="Number of parent groups for parent-child generation"),
+    split_pct: float = typer.Option(100.0, "--split-pct", help="% of rows in parent groups (rest are flat, default 100)"),
+    parent_fields_json: str = typer.Option(None, "--parent-fields-json", help="Inline JSON parent field definitions (for grouped mode)"),
+    child_fields_json: str = typer.Option(None, "--child-fields-json", help="Inline JSON child field definitions (for grouped mode)"),
     fmt: str = typer.Option("table", "--format", "-f", help="Output format"),
     db: str = typer.Option(None, "--db", "-d", help="DuckDB path override"),
 ) -> None:
@@ -92,11 +97,29 @@ def generate(
             "rows": rows,
             "fields": fields,
         }]
+    elif groups is not None:
+        defs_data = [{
+            "name": name,
+            "rows": rows,
+            "fields": [],
+        }]
     else:
-        console.print("[red]Error:[/red] One of --template, --fields-json, --fields-file, or --datasets-file is required")
+        console.print("[red]Error:[/red] One of --template, --fields-json, --fields-file, --datasets-file, or --groups is required")
         raise typer.Exit(code=1)
 
     dataset_defs = [_parse_dataset_def(d) for d in defs_data]
+
+    if groups is not None:
+        pf = json.loads(parent_fields_json) if parent_fields_json else []
+        cf = json.loads(child_fields_json) if child_fields_json else []
+        group_cfg = GroupConfig(
+            num_groups=groups,
+            split_pct=split_pct,
+            parent_fields=[_parse_field(f) for f in pf],
+            child_fields=[_parse_field(f) for f in cf],
+        )
+        for dd in dataset_defs:
+            dd.group_config = group_cfg
 
     request = GenerateRequest(
         datasets=dataset_defs,
@@ -134,27 +157,39 @@ def generate(
     )
 
 
+def _parse_field(f: dict) -> FieldDefinition:
+    constraint = None
+    if f.get("constraint"):
+        constraint = ConstraintConfig(**f["constraint"])
+    return FieldDefinition(
+        name=f["name"],
+        type=f.get("type", "string"),
+        generator=f.get("generator", "text"),
+        constraint=constraint,
+        null_probability=f.get("null_probability"),
+        condition=f.get("condition"),
+        unique=f.get("unique", False),
+        formula=f.get("formula"),
+    )
+
+
 def _parse_dataset_def(d: dict) -> DatasetDefinition:
-    fields = []
-    for f in d.get("fields", []):
-        constraint = None
-        if f.get("constraint"):
-            constraint = ConstraintConfig(**f["constraint"])
-        fields.append(
-            FieldDefinition(
-                name=f["name"],
-                type=f.get("type", "string"),
-                generator=f.get("generator", "text"),
-                constraint=constraint,
-                null_probability=f.get("null_probability"),
-                condition=f.get("condition"),
-            )
+    fields = [_parse_field(f) for f in d.get("fields", [])]
+    group_cfg = None
+    if d.get("group_config"):
+        gc = d["group_config"]
+        group_cfg = GroupConfig(
+            num_groups=gc["num_groups"],
+            split_pct=gc.get("split_pct", 100),
+            parent_fields=[_parse_field(f) for f in gc.get("parent_fields", [])],
+            child_fields=[_parse_field(f) for f in gc.get("child_fields", [])],
         )
     return DatasetDefinition(
         name=d.get("name", "Untitled"),
         rows=d.get("rows", 100),
         template=d.get("template"),
         fields=fields,
+        group_config=group_cfg,
     )
 
 

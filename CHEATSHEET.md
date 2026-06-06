@@ -148,9 +148,13 @@ uv run faker financial history AAPL
 uv run faker financial history AAPL --period 3mo --interval 1d
 uv run faker financial history AAPL --period 1y --interval 1wk
 
-# Batch fetch → dataset
+# Batch fetch → dataset (snapshot: 1 row/symbol)
 uv run faker financial batch "AAPL,MSFT,GOOG"
 uv run faker financial batch "AAPL,MSFT,GOOG" --name "tech_quotes"
+
+# Batch fetch → dataset (history: time series)
+uv run faker financial batch "AAPL,MSFT" --history --period 1mo --interval 1d --name "tech_history"
+uv run faker financial batch "AAPL,MSFT" --history --period 5d --interval 1d
 
 # Enrich existing dataset with financial data
 uv run faker financial enrich <DATASET_ID> --ticker-column symbol --enrich price,volume,market_cap
@@ -269,10 +273,15 @@ curl "http://localhost:8000/financial/quote?ticker=AAPL"
 # Financial history
 curl "http://localhost:8000/financial/history?ticker=AAPL&period=3mo&interval=1d"
 
-# Financial batch
+# Financial batch (snapshot)
 curl -X POST http://localhost:8000/financial/batch-to-dataset \
   -H 'Content-Type: application/json' \
   -d '{"symbols":["AAPL","MSFT","GOOG"],"name":"quotes"}'
+
+# Financial batch (history)
+curl -X POST http://localhost:8000/financial/batch-history \
+  -H 'Content-Type: application/json' \
+  -d '{"symbols":["AAPL","MSFT"],"period":"1mo","interval":"1d","name":"history"}'
 
 # Financial enrich
 curl -X POST http://localhost:8000/financial/enrich \

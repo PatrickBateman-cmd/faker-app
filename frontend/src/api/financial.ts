@@ -1,4 +1,4 @@
-import type { Quote, HistoryRecord, BatchRequest, DatasetResult } from "../types/financial";
+import type { Quote, HistoryRecord, BatchRequest, BatchHistoryRequest, DatasetResult } from "../types/financial";
 import type { TransformResponse } from "../types/transform";
 
 export interface EnrichmentDef {
@@ -33,6 +33,19 @@ export async function fetchHistory(
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(err.detail || "Failed to fetch history");
+  }
+  return res.json();
+}
+
+export async function fetchBatchHistory(body: BatchHistoryRequest): Promise<DatasetResult> {
+  const res = await fetch("/api/financial/batch-history", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || "Batch history fetch failed");
   }
   return res.json();
 }

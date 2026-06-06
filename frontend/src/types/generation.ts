@@ -2,12 +2,20 @@ import type { ConstraintDef as ConstraintConfig, FieldDef, TemplateSummary } fro
 
 export type { ConstraintConfig, FieldDef, TemplateSummary };
 
+export interface GroupConfig {
+  num_groups: number;
+  split_pct: number;
+  parent_fields: FieldDef[];
+  child_fields: FieldDef[];
+}
+
 export interface DatasetDefinition {
   name: string;
   template?: string | null;
   rows: number;
   fields: FieldDef[];
   shared_key?: SharedKeyConfig | null;
+  group_config?: GroupConfig | null;
 }
 
 export interface SharedKeyConfig {

@@ -73,7 +73,9 @@ uv run faker datasets list                                     # List datasets
 uv run faker datasets view <ID>                                # View rows
 uv run faker datasets export <ID> csv -o data.csv              # Export
 uv run faker iso search pacs                                   # ISO search
-uv run faker financial quote AAPL                              # Stock quote
+uv run faker financial quote AAPL                                   # Stock quote
+uv run faker financial batch "AAPL,MSFT" --name snap                # Snapshot (1 row/symbol)
+uv run faker financial batch "AAPL,MSFT" --history --period 1mo     # History (time series)
 uv run faker financial enrich <ID> --ticker-column sym --enrich price,volume  # Enrich
 uv run faker transform aggregate <ID> --name "r" --group-by country --agg "amount:sum:total"  # Aggregate
 uv run faker transform dedup <ID> --name "r" --keys email      # Deduplicate

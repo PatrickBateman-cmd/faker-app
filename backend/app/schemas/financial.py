@@ -20,3 +20,10 @@ class EnrichResponse(BaseModel):
     row_count: int
     columns: list[str]
     source_dataset: str
+
+
+class BatchHistoryRequest(BaseModel):
+    symbols: list[str] = Field(..., min_length=1, max_length=50)
+    period: str = "1mo"
+    interval: str = "1d"
+    name: str | None = None

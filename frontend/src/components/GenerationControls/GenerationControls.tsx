@@ -9,6 +9,7 @@ import type {
   DatasetDefinition,
   DatasetResult,
   FieldDef,
+  GroupConfig,
   TemplateSummary,
 } from "../../types/generation";
 
@@ -80,19 +81,46 @@ function emptyField(): FieldDef {
   return { name: "", generator: "text", type: "string", unique: false };
 }
 
-function emptyDataset(name?: string): DatasetDefinition {
-  return {
-    name: name || "",
-    rows: 100,
-    fields: [emptyField()],
-  };
-}
+  function emptyGroupConfig(): GroupConfig {
+    return {
+      num_groups: 4,
+      split_pct: 100,
+      parent_fields: [emptyField()],
+      child_fields: [emptyField()],
+    };
+  }
+
+  function switchMode(newMode: "flat" | "grouped") {
+    setMode(newMode);
+    setDatasets((prev) =>
+      prev.map((d) => {
+        if (newMode === "grouped" && !d.group_config) {
+          return { ...d, group_config: emptyGroupConfig() };
+        }
+        if (newMode === "flat") {
+          const { group_config, ...rest } = d;
+          return rest;
+        }
+        return d;
+      })
+    );
+    setResults(null);
+  }
+
+  function emptyDataset(name?: string): DatasetDefinition {
+    return {
+      name: name || "",
+      rows: 100,
+      fields: [emptyField()],
+    };
+  }
 
 export function GenerationControls({ onNavigate, pendingTemplate: externalTemplate }: { onNavigate?: (page: string) => void; pendingTemplate?: string | null }) {
   const [datasetCount, setDatasetCount] = useState(1);
   const [datasets, setDatasets] = useState<DatasetDefinition[]>([emptyDataset("Dataset 1")]);
   const [homogeneity, setHomogeneity] = useState(50);
   const [seed, setSeed] = useState("");
+  const [mode, setMode] = useState<"flat" | "grouped">("flat");
   const [results, setResults] = useState<DatasetResult[] | null>(null);
 
   const templates = useQuery({
@@ -239,6 +267,30 @@ export function GenerationControls({ onNavigate, pendingTemplate: externalTempla
         </div>
       </div>
 
+      {/* Flat / Grouped toggle */}
+      <div className="flex items-center gap-4">
+        <label className="flex items-center gap-2 text-sm text-[var(--text)] cursor-pointer">
+          <input
+            type="radio"
+            name="genMode"
+            checked={mode === "flat"}
+            onChange={() => switchMode("flat")}
+            className="accent-[var(--accent)]"
+          />
+          Flat
+        </label>
+        <label className="flex items-center gap-2 text-sm text-[var(--text)] cursor-pointer">
+          <input
+            type="radio"
+            name="genMode"
+            checked={mode === "grouped"}
+            onChange={() => switchMode("grouped")}
+            className="accent-[var(--accent)]"
+          />
+          Parent-Child
+        </label>
+      </div>
+
       <div className="flex gap-4 flex-1 min-h-0 overflow-auto">
         {datasets.map((ds, dsIndex) => (
           <div
@@ -285,36 +337,213 @@ export function GenerationControls({ onNavigate, pendingTemplate: externalTempla
               />
             </div>
 
-            <div className="flex flex-col gap-1 overflow-y-auto max-h-80">
-              <DndContext collisionDetection={closestCenter} onDragEnd={(e) => {
-                const { active, over } = e;
-                if (over && active.id !== over.id) {
-                  const oldIndex = parseInt(active.id.toString().split("-")[2]);
-                  const newIndex = parseInt(over.id.toString().split("-")[2]);
-                  moveField(dsIndex, oldIndex, newIndex);
-                }
-              }}>
-                <SortableContext items={ds.fields.map((_, i) => `field-${dsIndex}-${i}`)} strategy={verticalListSortingStrategy}>
-                  {ds.fields.map((field, fIndex) => (
-                    <SortableFieldRow
-                      key={`field-${dsIndex}-${fIndex}`}
-                      field={field}
-                      index={fIndex}
-                      dsIndex={dsIndex}
-                      onChange={updateField}
-                      onRemove={removeField}
+            {mode === "grouped" && ds.group_config && (
+              <>
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-1">
+                    <label className="text-xs text-[var(--muted)]">Groups:</label>
+                    <input
+                      type="number"
+                      value={ds.group_config.num_groups}
+                      onChange={(e) =>
+                        updateDataset(dsIndex, (d) => ({
+                          ...d,
+                          group_config: d.group_config
+                            ? { ...d.group_config, num_groups: Math.max(1, Number(e.target.value) || 1) }
+                            : d.group_config,
+                        }))
+                      }
+                      className="w-14 bg-[var(--elevated)] border border-[var(--border)] rounded px-1.5 py-1 text-xs text-[var(--text)]"
+                      min={1}
                     />
-                  ))}
-                </SortableContext>
-              </DndContext>
-            </div>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <label className="text-xs text-[var(--muted)]">Split %:</label>
+                    <input
+                      type="number"
+                      value={ds.group_config.split_pct}
+                      onChange={(e) =>
+                        updateDataset(dsIndex, (d) => ({
+                          ...d,
+                          group_config: d.group_config
+                            ? { ...d.group_config, split_pct: Math.max(1, Math.min(100, Number(e.target.value) || 100)) }
+                            : d.group_config,
+                        }))
+                      }
+                      className="w-14 bg-[var(--elevated)] border border-[var(--border)] rounded px-1.5 py-1 text-xs text-[var(--text)]"
+                      min={1}
+                      max={100}
+                    />
+                  </div>
+                </div>
 
-            <button
-              onClick={() => addField(dsIndex)}
-              className="self-start text-xs text-[var(--muted)] hover:text-[var(--text)]"
-            >
-              + Add field
-            </button>
+                {/* Parent fields */}
+                <div>
+                  <p className="text-xs font-semibold text-[var(--accent)] uppercase tracking-wider mb-1">Parent Fields</p>
+                  <div className="flex flex-col gap-1 overflow-y-auto max-h-40">
+                    <DndContext collisionDetection={closestCenter} onDragEnd={(e) => {
+                      const { active, over } = e;
+                      if (over && active.id !== over.id) {
+                        const oldIndex = parseInt(active.id.toString().split("-")[3]);
+                        const newIndex = parseInt(over.id.toString().split("-")[3]);
+                        const gc = datasets[dsIndex].group_config;
+                        if (gc) {
+                          const moved = arrayMove(gc.parent_fields, oldIndex, newIndex);
+                          updateDataset(dsIndex, (d) => ({
+                            ...d,
+                            group_config: { ...gc, parent_fields: moved },
+                          }));
+                        }
+                      }
+                    }}>
+                      <SortableContext items={(ds.group_config.parent_fields ?? []).map((_, i) => `parent-${dsIndex}-${i}`)} strategy={verticalListSortingStrategy}>
+                        {(ds.group_config.parent_fields ?? []).map((field, fIndex) => (
+                          <SortableFieldRow
+                            key={`parent-${dsIndex}-${fIndex}`}
+                            field={field}
+                            index={fIndex}
+                            dsIndex={dsIndex}
+                            onChange={(dsIdx, fi, updater) => {
+                              const gc = datasets[dsIdx].group_config;
+                              if (gc) {
+                                const updated = gc.parent_fields.map((f: FieldDef, i: number) => i === fi ? updater(f) : f);
+                                updateDataset(dsIdx, (d) => ({
+                                  ...d,
+                                  group_config: { ...gc, parent_fields: updated },
+                                }));
+                              }
+                            }}
+                            onRemove={(dsIdx, fi) => {
+                              const gc = datasets[dsIdx].group_config;
+                              if (gc) {
+                                updateDataset(dsIdx, (d) => ({
+                                  ...d,
+                                  group_config: { ...gc, parent_fields: gc.parent_fields.filter((_: FieldDef, i: number) => i !== fi) },
+                                }));
+                              }
+                            }}
+                          />
+                        ))}
+                      </SortableContext>
+                    </DndContext>
+                    <button
+                      onClick={() => {
+                        const gc = datasets[dsIndex].group_config;
+                        if (gc) {
+                          updateDataset(dsIndex, (d) => ({
+                            ...d,
+                            group_config: { ...gc, parent_fields: [...gc.parent_fields, emptyField()] },
+                          }));
+                        }
+                      }}
+                      className="self-start text-xs text-[var(--muted)] hover:text-[var(--text)]"
+                    >
+                      + Add parent field
+                    </button>
+                  </div>
+                </div>
+
+                {/* Child fields */}
+                <div>
+                  <p className="text-xs font-semibold text-[var(--accent)] uppercase tracking-wider mb-1">Child Fields</p>
+                  <div className="flex flex-col gap-1 overflow-y-auto max-h-40">
+                    <DndContext collisionDetection={closestCenter} onDragEnd={(e) => {
+                      const { active, over } = e;
+                      if (over && active.id !== over.id) {
+                        const oldIndex = parseInt(active.id.toString().split("-")[3]);
+                        const newIndex = parseInt(over.id.toString().split("-")[3]);
+                        const gc = datasets[dsIndex].group_config;
+                        if (gc) {
+                          const moved = arrayMove(gc.child_fields, oldIndex, newIndex);
+                          updateDataset(dsIndex, (d) => ({
+                            ...d,
+                            group_config: { ...gc, child_fields: moved },
+                          }));
+                        }
+                      }
+                    }}>
+                      <SortableContext items={(ds.group_config.child_fields ?? []).map((_, i) => `child-${dsIndex}-${i}`)} strategy={verticalListSortingStrategy}>
+                        {(ds.group_config.child_fields ?? []).map((field, fIndex) => (
+                          <SortableFieldRow
+                            key={`child-${dsIndex}-${fIndex}`}
+                            field={field}
+                            index={fIndex}
+                            dsIndex={dsIndex}
+                            onChange={(dsIdx, fi, updater) => {
+                              const gc = datasets[dsIdx].group_config;
+                              if (gc) {
+                                const updated = gc.child_fields.map((f: FieldDef, i: number) => i === fi ? updater(f) : f);
+                                updateDataset(dsIdx, (d) => ({
+                                  ...d,
+                                  group_config: { ...gc, child_fields: updated },
+                                }));
+                              }
+                            }}
+                            onRemove={(dsIdx, fi) => {
+                              const gc = datasets[dsIdx].group_config;
+                              if (gc) {
+                                updateDataset(dsIdx, (d) => ({
+                                  ...d,
+                                  group_config: { ...gc, child_fields: gc.child_fields.filter((_: FieldDef, i: number) => i !== fi) },
+                                }));
+                              }
+                            }}
+                          />
+                        ))}
+                      </SortableContext>
+                    </DndContext>
+                    <button
+                      onClick={() => {
+                        const gc = datasets[dsIndex].group_config;
+                        if (gc) {
+                          updateDataset(dsIndex, (d) => ({
+                            ...d,
+                            group_config: { ...gc, child_fields: [...gc.child_fields, emptyField()] },
+                          }));
+                        }
+                      }}
+                      className="self-start text-xs text-[var(--muted)] hover:text-[var(--text)]"
+                    >
+                      + Add child field
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {mode === "flat" && (
+              <>
+                <div className="flex flex-col gap-1 overflow-y-auto max-h-80">
+                  <DndContext collisionDetection={closestCenter} onDragEnd={(e) => {
+                    const { active, over } = e;
+                    if (over && active.id !== over.id) {
+                      const oldIndex = parseInt(active.id.toString().split("-")[2]);
+                      const newIndex = parseInt(over.id.toString().split("-")[2]);
+                      moveField(dsIndex, oldIndex, newIndex);
+                    }
+                  }}>
+                    <SortableContext items={ds.fields.map((_, i) => `field-${dsIndex}-${i}`)} strategy={verticalListSortingStrategy}>
+                      {ds.fields.map((field, fIndex) => (
+                        <SortableFieldRow
+                          key={`field-${dsIndex}-${fIndex}`}
+                          field={field}
+                          index={fIndex}
+                          dsIndex={dsIndex}
+                          onChange={updateField}
+                          onRemove={removeField}
+                        />
+                      ))}
+                    </SortableContext>
+                  </DndContext>
+                </div>
+                <button
+                  onClick={() => addField(dsIndex)}
+                  className="self-start text-xs text-[var(--muted)] hover:text-[var(--text)]"
+                >
+                  + Add field
+                </button>
+              </>
+            )}
           </div>
         ))}
       </div>

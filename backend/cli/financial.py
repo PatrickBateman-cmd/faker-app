@@ -1,6 +1,6 @@
 import typer
 
-from app.services.financial_service import batch_to_dataset, get_history, get_quote
+from app.services.financial_service import batch_history, batch_to_dataset, get_history, get_quote
 
 from cli.common import console, get_state, output_result
 
@@ -81,10 +81,16 @@ def history(
 def batch(
     symbols: str = typer.Argument(..., help="Comma-separated symbols (e.g. AAPL,MSFT,GOOG)"),
     name: str = typer.Option(None, "--name", "-n", help="Dataset name"),
+    history: bool = typer.Option(False, "--history", help="Fetch full history instead of current snapshot"),
+    period: str = typer.Option("1mo", "--period", "-p", help="History period (1d, 5d, 1mo, 3mo, 6mo, 1y, 5y, max)"),
+    interval: str = typer.Option("1d", "--interval", "-i", help="History interval (1m, 5m, 15m, 30m, 60m, 1d, 1wk, 1mo)"),
     fmt: str = typer.Option("table", "--format", "-f", help="Output format"),
     db: str = typer.Option(None, "--db", "-d", help="DuckDB path override"),
 ) -> None:
-    """Fetch quotes for multiple symbols and save as a dataset."""
+    """Fetch data for multiple symbols and save as a dataset.
+
+    Defaults to current snapshot (1 row/symbol). Use --history for time series.
+    """
     state = get_state()
     state.ensure_db(db=db)
 
@@ -96,12 +102,22 @@ def batch(
         console.print("[red]Error:[/red] Maximum 50 symbols allowed")
         raise typer.Exit(code=1)
 
-    with console.status(f"Fetching quotes for {len(symbol_list)} symbols..."):
-        try:
-            result = batch_to_dataset(symbol_list, name=name)
-        except ValueError as e:
-            console.print(f"[red]Error:[/red] {e}")
-            raise typer.Exit(code=1) from e
+    if history:
+        label = f"history ({period}, {interval})"
+        with console.status(f"Fetching history for {len(symbol_list)} symbols..."):
+            try:
+                result = batch_history(symbol_list, period=period, interval=interval, name=name)
+            except ValueError as e:
+                console.print(f"[red]Error:[/red] {e}")
+                raise typer.Exit(code=1) from e
+    else:
+        label = "quotes"
+        with console.status(f"Fetching quotes for {len(symbol_list)} symbols..."):
+            try:
+                result = batch_to_dataset(symbol_list, name=name)
+            except ValueError as e:
+                console.print(f"[red]Error:[/red] {e}")
+                raise typer.Exit(code=1) from e
 
     rows = [[
         result.dataset_id[:8] + "...",
@@ -110,7 +126,7 @@ def batch(
         ", ".join(result.columns),
     ]]
     output_result(
-        "Financial Batch Dataset",
+        f"Financial Batch Dataset ({label})",
         ["ID", "Name", "Rows", "Columns"],
         rows,
         fmt,

@@ -30,12 +30,20 @@ class SharedKeyConfig(BaseModel):
     source_field: str
 
 
+class GroupConfig(BaseModel):
+    num_groups: int = Field(..., ge=1, le=10000)
+    split_pct: float = Field(default=100, ge=1, le=100)
+    parent_fields: list[FieldDefinition]
+    child_fields: list[FieldDefinition]
+
+
 class DatasetDefinition(BaseModel):
     name: str
     template: str | None = None
     rows: int = Field(default=100, ge=1, le=100000)
     fields: list[FieldDefinition] = Field(default_factory=list)
     shared_key: SharedKeyConfig | None = None
+    group_config: GroupConfig | None = None
 
 
 class GenerateRequest(BaseModel):

@@ -228,6 +228,75 @@ def enrich_dataset(
     )
 
 
+def batch_history(symbols: list[str], period: str = "1mo", interval: str = "1d", name: str | None = None) -> DatasetResult:
+    dataset_id = str(uuid.uuid4())
+    table_name = f"dataset_{dataset_id}"
+    validate_table_name(table_name)
+
+    HISTORY_COLUMNS = ["symbol", "date", "open", "high", "low", "close", "volume"]
+    for col in HISTORY_COLUMNS:
+        validate_column_name(col)
+
+    db = DuckDBManager.get_instance()
+    col_defs = ", ".join(f'"{c}" VARCHAR' for c in HISTORY_COLUMNS)
+    db.execute(f'CREATE TABLE "{table_name}" ({col_defs})')
+
+    all_rows: list[list[str | float | int]] = []
+    skipped: list[str] = []
+
+    for symbol in symbols:
+        try:
+            records = get_history(symbol.strip(), period=period, interval=interval)
+        except (ValueError, KeyError, AttributeError) as e:
+            logger.warning("Skipping symbol '%s': %s", symbol, e)
+            skipped.append(symbol.strip())
+            continue
+        for rec in records:
+            all_rows.append([
+                symbol.strip().upper(),
+                rec["date"],
+                rec["open"],
+                rec["high"],
+                rec["low"],
+                rec["close"],
+                rec["volume"],
+            ])
+
+    if not all_rows:
+        raise ValueError("No history data for any of the requested symbols")
+
+    placeholders = ", ".join("?" for _ in HISTORY_COLUMNS)
+    quoted_cols = ", ".join(f'"{c}"' for c in HISTORY_COLUMNS)
+    db.get_connection().executemany(
+        f'INSERT INTO "{table_name}" ({quoted_cols}) VALUES ({placeholders})',
+        all_rows,
+    )
+
+    count_row = db.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()
+    row_count = count_row[0] if count_row else len(all_rows)
+    columns_json = json.dumps(HISTORY_COLUMNS)
+
+    dataset_name = name or f"Financial History ({len(symbols)} symbols, {period})"
+    db.execute(
+        """
+        INSERT INTO metadata_datasets (dataset_id, run_id, name, table_name, columns_json, row_count, homogeneity, seed)
+        VALUES (?, NULL, ?, ?, ?, ?, NULL, NULL)
+        """,
+        [dataset_id, dataset_name, table_name, columns_json, row_count],
+    )
+
+    if skipped:
+        logger.info("Fetched history for %d symbols, skipped: %s", len(symbols), ", ".join(skipped))
+
+    return DatasetResult(
+        dataset_id=dataset_id,
+        name=dataset_name,
+        table_name=table_name,
+        row_count=row_count,
+        columns=HISTORY_COLUMNS,
+    )
+
+
 def _get_source_dataset(dataset_id: str) -> dict | None:
     from app.services.dataset_service import get_dataset
 

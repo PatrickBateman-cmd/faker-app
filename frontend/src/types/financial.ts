@@ -27,6 +27,13 @@ export interface BatchRequest {
   name?: string | null;
 }
 
+export interface BatchHistoryRequest {
+  symbols: string[];
+  period: string;
+  interval: string;
+  name?: string | null;
+}
+
 export interface DatasetResult {
   dataset_id: string;
   name: string;

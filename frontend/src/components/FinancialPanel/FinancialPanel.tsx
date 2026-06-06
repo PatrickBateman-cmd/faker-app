@@ -3,7 +3,7 @@ import { useState } from "react";
 import {
   CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
-import { fetchQuote, fetchHistory, batchFetchToDataset, enrichDataset } from "../../api/financial";
+import { fetchQuote, fetchHistory, batchFetchToDataset, fetchBatchHistory, enrichDataset } from "../../api/financial";
 import { fetchDatasets, fetchDatasetColumns } from "../../api/datasets";
 import type { DatasetMeta } from "../../types/dataset";
 import type { ColumnInfo } from "../../types/dataset";
@@ -40,6 +40,9 @@ export function FinancialPanel({ onNavigate }: { onNavigate?: (page: string) => 
 
   const [batchInput, setBatchInput] = useState("AAPL, MSFT, GOOG, AMZN, TSLA");
   const [batchName, setBatchName] = useState("");
+  const [batchMode, setBatchMode] = useState<"snapshot" | "history">("snapshot");
+  const [batchPeriod, setBatchPeriod] = useState("1mo");
+  const [batchInterval, setBatchInterval] = useState("1d");
 
   const [enrichDatasetId, setEnrichDatasetId] = useState("");
   const [enrichTickerCol, setEnrichTickerCol] = useState("");
@@ -59,7 +62,7 @@ export function FinancialPanel({ onNavigate }: { onNavigate?: (page: string) => 
   });
 
   const batchMut = useMutation({
-    mutationFn: batchFetchToDataset,
+    mutationFn: batchMode === "snapshot" ? batchFetchToDataset : fetchBatchHistory,
   });
 
   const datasetsQuery = useQuery({
@@ -110,7 +113,11 @@ export function FinancialPanel({ onNavigate }: { onNavigate?: (page: string) => 
       .map((s) => s.trim().toUpperCase())
       .filter(Boolean);
     if (symbols.length === 0) return;
-    batchMut.mutate({ symbols, name: batchName || null });
+    if (batchMode === "snapshot") {
+      batchMut.mutate({ symbols, name: batchName || null });
+    } else {
+      batchMut.mutate({ symbols, period: batchPeriod, interval: batchInterval, name: batchName || null });
+    }
   }
 
   return (
@@ -296,6 +303,31 @@ export function FinancialPanel({ onNavigate }: { onNavigate?: (page: string) => 
         <h3 className="text-sm font-semibold text-[var(--muted)] uppercase tracking-wider mb-3">
           Batch Fetch → Dataset
         </h3>
+
+        {/* Snapshot / History toggle */}
+        <div className="flex items-center gap-4 mb-4">
+          <label className="flex items-center gap-2 text-sm text-[var(--text)] cursor-pointer">
+            <input
+              type="radio"
+              name="batchMode"
+              checked={batchMode === "snapshot"}
+              onChange={() => setBatchMode("snapshot")}
+              className="accent-[var(--accent)]"
+            />
+            Current Snapshot
+          </label>
+          <label className="flex items-center gap-2 text-sm text-[var(--text)] cursor-pointer">
+            <input
+              type="radio"
+              name="batchMode"
+              checked={batchMode === "history"}
+              onChange={() => setBatchMode("history")}
+              className="accent-[var(--accent)]"
+            />
+            Full History
+          </label>
+        </div>
+
         <div className="flex gap-4">
           <div className="flex-1 flex flex-col gap-2">
             <textarea
@@ -311,6 +343,28 @@ export function FinancialPanel({ onNavigate }: { onNavigate?: (page: string) => 
               placeholder="Dataset name (optional)"
               className="bg-[var(--elevated)] border border-[var(--border)] rounded px-3 py-2 text-sm text-[var(--text)] placeholder:text-[var(--muted)] focus:outline-none focus:border-cyan-700"
             />
+            {batchMode === "history" && (
+              <div className="flex gap-3">
+                <select
+                  value={batchPeriod}
+                  onChange={(e) => setBatchPeriod(e.target.value)}
+                  className="bg-[var(--elevated)] text-[var(--text)] border border-[var(--border)] rounded px-2 py-1.5 text-sm flex-1"
+                >
+                  {periods.map((p) => (
+                    <option key={p.value} value={p.value}>{p.label}</option>
+                  ))}
+                </select>
+                <select
+                  value={batchInterval}
+                  onChange={(e) => setBatchInterval(e.target.value)}
+                  className="bg-[var(--elevated)] text-[var(--text)] border border-[var(--border)] rounded px-2 py-1.5 text-sm flex-1"
+                >
+                  {INTERVALS.map((i) => (
+                    <option key={i.value} value={i.value}>{i.label}</option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
           <div className="flex flex-col justify-end gap-2">
             <button

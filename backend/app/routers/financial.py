@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Body, HTTPException, Query
 
-from app.schemas.financial import EnrichRequest, EnrichResponse
+from app.schemas.financial import BatchHistoryRequest, EnrichRequest, EnrichResponse
 from app.schemas.generation import DatasetResult
 from app.services import financial_service
 
@@ -42,6 +42,21 @@ async def batch_to_dataset(
         raise HTTPException(status_code=422, detail="Maximum 50 symbols per batch")
     try:
         return financial_service.batch_to_dataset(symbols, name=name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.post("/batch-history")
+async def batch_history(body: BatchHistoryRequest) -> DatasetResult:
+    try:
+        return financial_service.batch_history(
+            symbols=body.symbols,
+            period=body.period,
+            interval=body.interval,
+            name=body.name,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
