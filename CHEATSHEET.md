@@ -57,6 +57,16 @@ uv run faker generate --name "quiet" --rows 100 --template Person --quiet
 
 # Custom DuckDB
 uv run faker generate --name "custom" --rows 50 --template Person --db ./my_data.duckdb
+
+# Parent-child grouped generation (N groups, random distribution, 4 groups → ~250 rows each)
+uv run faker generate --name "trades" --rows 1000 --groups 4 --split-pct 100 \
+  --parent-fields-json '[{"name":"trade_id","generator":"uuid4","type":"string"},{"name":"symbol","generator":"random_element","type":"string","constraint":{"values":"AAPL,MSFT,GOOG"}}]' \
+  --child-fields-json '[{"name":"alloc_id","generator":"uuid4","type":"string"},{"name":"qty","generator":"random_int","type":"integer","constraint":{"min":10,"max":1000}}]'
+
+# Mixed: 70% of rows in groups, 30% flat rows (parent_id=NULL)
+uv run faker generate --name "mixed" --rows 1000 --groups 3 --split-pct 70 \
+  --parent-fields-json '[{"name":"dept","generator":"random_element","type":"string","constraint":{"values":"Eng,Sales,HR"}}]' \
+  --child-fields-json '[{"name":"employee","generator":"name","type":"string"}]\'
 ```
 
 ## Datasets
@@ -277,6 +287,11 @@ curl "http://localhost:8000/financial/history?ticker=AAPL&period=3mo&interval=1d
 curl -X POST http://localhost:8000/financial/batch-to-dataset \
   -H 'Content-Type: application/json' \
   -d '{"symbols":["AAPL","MSFT","GOOG"],"name":"quotes"}'
+
+# Generate parent-child grouped dataset
+curl -X POST http://localhost:8000/generate \
+  -H 'Content-Type: application/json' \
+  -d '{"datasets":[{"name":"trades","rows":1000,"fields":[],"group_config":{"num_groups":4,"split_pct":80,"parent_fields":[{"name":"trade_id","generator":"uuid4","type":"string"}],"child_fields":[{"name":"alloc_id","generator":"uuid4","type":"string"},{"name":"qty","generator":"random_int","type":"integer","constraint":{"min":10,"max":1000}}]}}],"homogeneity":100}'
 
 # Financial batch (history)
 curl -X POST http://localhost:8000/financial/batch-history \

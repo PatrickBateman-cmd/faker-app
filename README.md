@@ -7,6 +7,7 @@ Synthetic dataset generator with ISO 20022 integration, financial data (yfinance
 ## Features
 
 - **Data Generation** — 1–4 datasets per run, configurable homogeneity (1–100%), deterministic seeds, 50+ Faker generators
+- **Parent-child grouped generation** — `--groups N` distributes rows across parent groups; parent fields repeat on every child row
 - **Formula evaluation** — Cross-field Jinja2 templates (`{{first_name|lower}}.{{last_name|lower}}@example.com`)
 - **Conditional fields** — `condition: "age >= 18"` skips fields based on other column values
 - **Null probability** — Per-field NULL injection for realistic missing data
@@ -73,6 +74,9 @@ uv run faker datasets list                                     # List datasets
 uv run faker datasets view <ID>                                # View rows
 uv run faker datasets export <ID> csv -o data.csv              # Export
 uv run faker iso search pacs                                   # ISO search
+uv run faker generate --name "trades" --rows 1000 --groups 4 \ # Parent-child grouped
+  --parent-fields-json '[{"name":"trade_id","generator":"uuid4","type":"string"}]' \
+  --child-fields-json '[{"name":"qty","generator":"random_int","type":"integer","constraint":{"min":10,"max":1000}}]'
 uv run faker financial quote AAPL                                   # Stock quote
 uv run faker financial batch "AAPL,MSFT" --name snap                # Snapshot (1 row/symbol)
 uv run faker financial batch "AAPL,MSFT" --history --period 1mo     # History (time series)
@@ -127,6 +131,7 @@ Backend on `http://localhost:8000`, frontend on `http://localhost:80`.
 - **ISO 20022**: offline-capable (cached in DuckDB with 1h TTL). When iso20022.org is unreachable, falls back to cached or hardcoded data.
 - **Formula fields**: use Jinja2 syntax (`{{field_name|lower}}`) and reference fields that appear earlier in the field list.
 - **Financial enrich**: joins yfinance quote data against an existing dataset on a ticker column, creating a new enriched dataset.
+- **Parent-child grouped generation**: `--groups N --split-pct P` creates parent-child datasets. Parent fields repeat on every child row within a group, identified by `parent_id`. `split_pct` controls % of rows in groups (rest are flat with `parent_id=NULL`).
 - **Catppuccin theme**: 4 variants via the ThemeSwitcher dropdown in the sidebar, persisted to localStorage.
 - **No auth**: `AUTH_ENABLED` setting is declared but unimplemented — all endpoints are public.
 

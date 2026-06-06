@@ -25,6 +25,11 @@ uv run faker init
 # Generate 100 rows from a template
 uv run faker generate --name "demo" --rows 100 --template Person
 
+# Generate parent-child grouped dataset (4 groups, 1000 child rows)
+uv run faker generate --name "trades" --rows 1000 --groups 4 \
+  --parent-fields-json '[{"name":"trade_id","generator":"uuid4","type":"string"}]' \
+  --child-fields-json '[{"name":"alloc_id","generator":"uuid4","type":"string"},{"name":"qty","generator":"random_int","type":"integer","constraint":{"min":10,"max":1000}}]'
+
 # List datasets
 uv run faker datasets list
 
@@ -171,6 +176,7 @@ npm run test    # vitest run                       # frontend tests
 | **Docker Compose** | Production deployment with nginx reverse proxy |
 | **Backend test suite** | 40 pytest tests covering all services + API |
 | **Frontend test suite** | 2 vitest smoke tests |
+| **Parent-child grouped generation** | `--groups N` distributes rows randomly across N parent groups with `parent_id` column; `split_pct` controls % of rows in groups |
 
 ## Remaining known issues
 
