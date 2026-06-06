@@ -19,8 +19,8 @@ TYPES = ["string", "integer", "float", "boolean", "date"]
 
 
 class FieldRow(Widget):
-    def __init__(self, field: dict, index: int, edit_mode: bool = False) -> None:
-        super().__init__()
+    def __init__(self, field: dict, index: int, edit_mode: bool = False, **kwargs) -> None:
+        super().__init__(**kwargs)
         self.field = field
         self.index = index
         self.edit_mode = edit_mode
@@ -57,8 +57,8 @@ class FieldList(Widget):
     mode = reactive("normal")
     selected = reactive(0)
 
-    def __init__(self, title: str = "Fields") -> None:
-        super().__init__()
+    def __init__(self, title: str = "Fields", **kwargs) -> None:
+        super().__init__(**kwargs)
         self._title = title
         self.fields: list[dict] = []
         self._key_buffer = ""

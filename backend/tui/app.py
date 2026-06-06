@@ -37,15 +37,13 @@ class FakerTUI(App):
         Binding("ctrl+c", "quit", "Quit", priority=True),
     ]
 
+    CSS_PATH = "app.tcss"
     TITLE = "Faker App"
     SUB_TITLE = "Synthetic Data Generator"
-
-    def compose(self) -> ComposeResult:
-        yield DashboardScreen(id="dashboard")
 
     def on_mount(self) -> None:
         self.push_screen("dashboard")
 
     def action_switch_to(self, screen_name: str) -> None:
         if screen_name in self.SCREENS:
-            self.push_screen(screen_name)
+            self.switch_screen(screen_name)

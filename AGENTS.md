@@ -18,10 +18,15 @@ Vite proxies `/api/*` → `http://localhost:8000/` (strips `/api` prefix).
 
 ```sh
 cd backend
+pkill -f uvicorn 2>/dev/null   # must stop server first (DuckDB single-writer)
 uv run faker tui
-# Number keys or g+letter to navigate screens
-# Vim keys (j/k/J/K/o/O/dd/i/Esc) in field editor
 ```
+
+TUI controls:
+- **Number keys** `1`–`6` or **g+letter** (`g g`, `g s`, `g d`, etc.) to switch screens
+- **`q`** / **`Ctrl+C`** to quit
+- **Field editor** (vim keys): `j`/`k` navigate, `J`/`K` reorder, `o`/`O` insert, `Delete` delete, `i` enter edit, `Esc`/`Enter` leave edit
+- **Generation**: fill name/rows, edit fields, press Generate button
 
 ### CLI (no server needed)
 
@@ -88,6 +93,7 @@ cd frontend && npx vitest run             # 2 frontend tests
 - **Cold start**: yfinance takes ~5s to import. Wait after starting backend.
 - **No auth middleware**. All endpoints public. `AUTH_ENABLED` setting is declared but unimplemented.
 - **DuckDB single-writer**: can't query the `.duckdb` file while the server runs.
+- **faker script path fix**: `.venv/bin/faker` inserts `backend/` into `sys.path` via `os.path.join(__file__, "..", "..", "..")` because hatchling `.pth` files are unreliable. This file is in `.gitignore`; regenerating via `uv sync` overwrites it.
 - **Schema migrations**: handled automatically on startup by `app/core/migrations.py`. No manual `rm` needed.
 
 ## Architecture
@@ -104,7 +110,7 @@ backend/app/config.py            ← Pydantic Settings from .env at repo root
 backend/app/routers/*.py         ← Each = APIRouter(prefix=..., tags=...)
 backend/app/services/*.py        ← Business logic
 backend/app/schemas/*.py         ← Pydantic models
-backend/tui/                     ← Textual TUI (6 screens, 2 widgets)
+backend/tui/                     ← Textual TUI (6 screens, 2 widgets, app.tcss styling)
 backend/tests/                   ← 40 pytest tests (8 test files + conftest)
 backend/Dockerfile               ← Python 3.14-slim production image
 frontend/Dockerfile              ← Multi-stage nginx production image
@@ -140,6 +146,17 @@ npm run test    # vitest run                       # frontend tests
 - Dataset list auto-refetches every 30s (background refetching disabled).
 - **Routing**: react-router-dom with `<Routes>` + `<Route>`. 6 pages: `/`, `/templates`, `/iso20022`, `/financial`, `/generation`, `/datasets`. No `useState<Page>`.
 - **Toasts**: `useToast()` hook + `<ToastContainer>` component replaces `alert()` calls.
+
+## TUI conventions
+
+- **Screen navigation**: `switch_screen` (not `push_screen`) — avoids stacking duplicate screens. Bindings in `app.py` via `BINDINGS` list with `priority=True`.
+- **CSS**: Catppuccin Mocha theme in `app.tcss`. All screens loaded via `CSS_PATH = "app.tcss"` on the `App` class.
+- **Widgets**: Custom widget classes (`FieldList`, `DatasetTable`, `FieldRow`) must forward `**kwargs` to `super().__init__()` or Textual cannot set `id`/`classes`.
+- **Screen scroll**: Each screen that could overflow sets `overflow-y: auto` in CSS.
+- **Services**: TUI calls backend services directly (in-process) via `app.services.*` — no HTTP server needed.
+- **DuckDB**: Must stop FastAPI server before running TUI (single-writer lock).
+- **Generation flow**: `GenerationScreen._do_generate()` builds `GenerateRequest` → calls `generate_datasets()` directly → shows result in `Static`.
+- **Financial chart**: Braille-dot line chart in `RichLog` via `_braille_line()` in `financial.py`.
 
 ## Refactoring completed (June 2026)
 
