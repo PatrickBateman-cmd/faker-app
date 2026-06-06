@@ -67,6 +67,16 @@ A full-stack web application (Python/FastAPI + React) for generating up to 4 syn
 ```
 faker-app/
 ├── backend/
+│   ├── cli/                               # CLI (typer) — no server needed
+│   │   ├── __init__.py
+│   │   ├── main.py                        # Typer app entry, command registration
+│   │   ├── common.py                      # Shared state, DuckDB init, output helpers
+│   │   ├── generate.py                    # Generate datasets from CLI
+│   │   ├── datasets.py                    # List, view, delete, export
+│   │   ├── templates.py                   # List, show, create, delete
+│   │   ├── iso20022.py                    # Domains, messages, search, xsd, save-template
+│   │   ├── financial.py                  # Quote, history, batch
+│   │   └── transform.py                  # Aggregate, dedup
 │   ├── app/
 │   │   ├── __init__.py
 │   │   ├── main.py                        # FastAPI app entry

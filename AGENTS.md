@@ -2,6 +2,8 @@
 
 ## Run
 
+### Web UI (two terminals)
+
 ```sh
 # Terminal 1 — Backend (port 8000)
 cd backend && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
@@ -10,7 +12,43 @@ cd backend && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 cd frontend && npm run dev
 ```
 
-No Docker available on dev machine. Vite proxies `/api/*` → `http://localhost:8000/` (strips `/api` prefix).
+Vite proxies `/api/*` → `http://localhost:8000/` (strips `/api` prefix).
+
+### CLI (no server needed)
+
+```sh
+cd backend
+
+# Init DuckDB (first time)
+uv run faker init
+
+# Generate 100 rows from a template
+uv run faker generate --name "demo" --rows 100 --template Person
+
+# List datasets
+uv run faker datasets list
+
+# View dataset rows
+uv run faker datasets view <DATASET_ID> --page 1 --per-page 20
+
+# Export to CSV
+uv run faker datasets export <DATASET_ID> csv --output ./data.csv
+
+# Batch financial quotes → dataset
+uv run faker financial batch "AAPL,MSFT,GOOG" --name "tech_quotes"
+
+# ISO search + save as template
+uv run faker iso search pacs
+uv run faker iso save-template pacs.008.001.12
+
+# Aggregate a dataset
+uv run faker transform aggregate <DATASET_ID> --name "by_country" --group-by "country" --agg "amount:sum:total"
+
+# Deduplicate a dataset
+uv run faker transform dedup <DATASET_ID> --name "unique" --keys "email"
+
+# All commands support --format json and --db <path>
+```
 
 ## Gotchas
 
@@ -23,13 +61,16 @@ No Docker available on dev machine. Vite proxies `/api/*` → `http://localhost:
 ## Architecture
 
 ```
-backend/app/main.py          ← FastAPI entry, registers 8 routers, global exception handler
-backend/app/core/database.py  ← DuckDBManager singleton (thread-safe via Lock)
-backend/app/core/validation.py ← validate_column_name() / validate_table_name()
-backend/app/config.py         ← Pydantic Settings from .env at repo root
-backend/app/routers/*.py      ← Each = APIRouter(prefix=..., tags=...)
-backend/app/services/*.py     ← Business logic
-backend/app/schemas/*.py      ← Pydantic models
+backend/cli/main.py              ← typer CLI entry point (8 command groups)
+backend/cli/common.py            ← Shared CLI state, DuckDB init, output helpers
+backend/cli/*.py                 ← Command groups: generate, datasets, templates, iso, financial, transform
+backend/app/main.py              ← FastAPI entry, registers 8 routers, global exception handler
+backend/app/core/database.py     ← DuckDBManager singleton (thread-safe via Lock)
+backend/app/core/validation.py   ← validate_column_name() / validate_table_name()
+backend/app/config.py            ← Pydantic Settings from .env at repo root
+backend/app/routers/*.py         ← Each = APIRouter(prefix=..., tags=...)
+backend/app/services/*.py        ← Business logic
+backend/app/schemas/*.py         ← Pydantic models
 ```
 
 Key service files: `generation_engine.py`, `dataset_service.py`, `transform_service.py` (aggregation+dedup), `export_service.py`, `template_library.py`, `iso20022_service.py`, `financial_service.py`.

@@ -56,25 +56,28 @@ Open **http://localhost:5173** in a browser. Vite proxies `/api/*` → `http://l
 | `MAX_ROWS_PER_DATASET` | `100000` | Max rows per generated dataset |
 | `MAX_DATASETS_PER_RUN` | `4` | Max datasets per generation |
 
-## Quick Test
+## CLI (no server needed)
 
-Once both servers are running:
+All backend features are available from the command line without starting the web server:
 
 ```sh
-# Health
-curl http://localhost:8000/health
+cd backend
 
-# Generate 50 rows
-curl -X POST http://localhost:8000/generate \
-  -H 'Content-Type: application/json' \
-  -d '{"datasets":[{"name":"demo","rows":50,"fields":[{"name":"name","generator":"name","type":"string"},{"name":"email","generator":"email","type":"string"}]}],"homogeneity":100,"seed":42}'
-
-# List datasets
-curl http://localhost:8000/datasets
-
-# Export CSV (replace DATASET_ID)
-curl http://localhost:8000/datasets/DATASET_ID/export/csv
+uv run faker init                                              # Init DuckDB
+uv run faker generate --name "demo" --rows 100 --template Person  # Generate
+uv run faker datasets list                                     # List datasets
+uv run faker datasets view <ID>                                # View rows
+uv run faker datasets export <ID> csv -o data.csv              # Export
+uv run faker iso search pacs                                   # ISO search
+uv run faker financial quote AAPL                              # Stock quote
+uv run faker financial batch "AAPL,MSFT,GOOG"                  # Batch → dataset
+uv run faker transform aggregate <ID> --name "r" --group-by country --agg "amount:sum:total"  # Aggregate
+uv run faker transform dedup <ID> --name "r" --keys email      # Deduplicate
 ```
+
+Add `--format json` for JSON output, `--db <path>` for custom DuckDB path.
+
+## Quick Test (Web UI)
 
 ## Notes
 
