@@ -14,6 +14,15 @@ cd frontend && npm run dev
 
 Vite proxies `/api/*` → `http://localhost:8000/` (strips `/api` prefix).
 
+### TUI (terminal UI)
+
+```sh
+cd backend
+uv run faker tui
+# Number keys or g+letter to navigate screens
+# Vim keys (j/k/J/K/o/O/dd/i/Esc) in field editor
+```
+
 ### CLI (no server needed)
 
 ```sh
@@ -95,6 +104,7 @@ backend/app/config.py            ← Pydantic Settings from .env at repo root
 backend/app/routers/*.py         ← Each = APIRouter(prefix=..., tags=...)
 backend/app/services/*.py        ← Business logic
 backend/app/schemas/*.py         ← Pydantic models
+backend/tui/                     ← Textual TUI (6 screens, 2 widgets)
 backend/tests/                   ← 40 pytest tests (8 test files + conftest)
 backend/Dockerfile               ← Python 3.14-slim production image
 frontend/Dockerfile              ← Multi-stage nginx production image
