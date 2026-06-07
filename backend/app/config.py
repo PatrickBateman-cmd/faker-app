@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -19,7 +21,10 @@ class Settings(BaseSettings):
     max_rows_per_dataset: int = 100000
     max_datasets_per_run: int = 4
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(
+        env_file=Path(__file__).parent.parent.parent / ".env",
+        env_file_encoding="utf-8",
+    )
 
 
 settings = Settings()

@@ -1,6 +1,10 @@
+import logging
+
 from fastapi import APIRouter
 
 from app.core.database import DuckDBManager
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["health"])
 
@@ -11,7 +15,8 @@ async def health():
         db = DuckDBManager.get_instance()
         db.execute("SELECT 1")
         return {"status": "ok", "version": "0.1.0", "duckdb": "connected"}
-    except Exception:
+    except Exception as e:
+        logger.error("Health check failed: %s", e)
         return {"status": "degraded", "version": "0.1.0", "duckdb": "disconnected"}
 
 

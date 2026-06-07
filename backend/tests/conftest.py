@@ -13,10 +13,7 @@ from app.core.database import DuckDBManager
 @pytest.fixture(autouse=True)
 def cleanup_db():
     """Close any existing DuckDB instance before/after each test."""
-    try:
-        DuckDBManager.close_instance()
-    except Exception:
-        pass
+    DuckDBManager.close_instance()
     yield
     try:
         DuckDBManager.close_instance()
@@ -44,10 +41,7 @@ def client():
     from app.main import app
     from app.config import settings
 
-    try:
-        DuckDBManager.close_instance()
-    except Exception:
-        pass
+    DuckDBManager.close_instance()
     tmpdir = tempfile.mkdtemp()
     old_path = settings.duckdb_path
     settings.duckdb_path = tmpdir
@@ -81,8 +75,7 @@ def templates_dir(db):
     (Path(tmpdir) / "person.xml").write_text(sample, encoding="utf-8")
 
     tl._sync_to_duckdb(tl._load_templates_from_disk())
-    if hasattr(tl, '_cache'):
-        tl._cache.clear()
+    tl._cache.clear()
     yield Path(tmpdir)
 
     tl.TEMPLATES_DIR = original

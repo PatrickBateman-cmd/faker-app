@@ -59,7 +59,8 @@ def info(
         template_count = rows[0] if rows else 0
         rows = mgr.execute("SELECT COUNT(*) FROM metadata_runs").fetchone()
         run_count = rows[0] if rows else 0
-    except Exception:
+    except Exception as e:
+        console.print(f"[red]Error querying database:[/red] {e}")
         dataset_count = template_count = run_count = 0
 
     output_result(

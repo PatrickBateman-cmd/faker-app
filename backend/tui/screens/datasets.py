@@ -33,7 +33,7 @@ class DatasetsScreen(Screen):
         try:
             datasets = list_datasets()
             items = "\n".join(
-                f"  [bold]{d['name']}[/] [dim]({d['row_count']} rows, {d['dataset_id'][:8]}...)[/dim]"
+                f"  [bold]{d['name']}[/] [dim]({d['row_count']} rows, {d['dataset_id']})[/dim]"
                 for d in datasets
             )
             self.query_one("#ds-items", Static).update(items)

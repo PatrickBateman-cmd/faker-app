@@ -120,7 +120,7 @@ def batch(
                 raise typer.Exit(code=1) from e
 
     rows = [[
-        result.dataset_id[:8] + "...",
+        result.dataset_id,
         result.name,
         str(result.row_count),
         ", ".join(result.columns),

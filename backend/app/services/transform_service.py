@@ -21,7 +21,10 @@ def _get_table_name(source_dataset_id: str) -> str | None:
     return validate_table_name(meta["table_name"])
 
 
-def _render_agg_expr(agg: AggregationDef) -> tuple[str, str]:
+_NUMERIC_AGG_FUNCTIONS = {"AVG", "SUM", "MIN", "MAX"}
+
+
+def _render_agg_expr(agg: AggregationDef, col_types: dict[str, str] | None = None) -> tuple[str, str]:
     col = validate_column_name(agg.column)
     alias = agg.alias or f"{agg.function}_{col}"
     validate_column_name(alias)
@@ -31,8 +34,17 @@ def _render_agg_expr(agg: AggregationDef) -> tuple[str, str]:
         expr = f'COUNT(DISTINCT {quoted}) AS "{alias}"'
     else:
         fn_upper = agg.function.upper()
+        raw_type = col_types.get(col, "").upper() if col_types else ""
+        if col_types and fn_upper in _NUMERIC_AGG_FUNCTIONS and raw_type.startswith("VARCHAR"):
+            quoted = f'CAST("{col}" AS DOUBLE)'
         expr = f'{fn_upper}({quoted}) AS "{alias}"'
     return expr, alias
+
+
+def _get_column_types(table_name: str) -> dict[str, str]:
+    db = DuckDBManager.get_instance()
+    rows = db.execute(f'DESCRIBE "{table_name}"').fetchall()
+    return {r[0]: r[1] for r in rows}
 
 
 def aggregate_dataset(
@@ -45,13 +57,14 @@ def aggregate_dataset(
         raise ValueError(msg)
 
     db = DuckDBManager.get_instance()
+    col_types = _get_column_types(table_name)
 
     group_cols_quoted = [f'"{validate_column_name(c)}"' for c in request.group_by]
     agg_parts: list[str] = []
     agg_cols: list[str] = []
 
     for agg in request.aggregations:
-        expr, alias = _render_agg_expr(agg)
+        expr, alias = _render_agg_expr(agg, col_types)
         agg_parts.append(expr)
         agg_cols.append(alias)
 

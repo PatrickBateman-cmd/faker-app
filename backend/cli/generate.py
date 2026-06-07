@@ -138,11 +138,11 @@ def generate(
     else:
         resp = generate_datasets(request)
 
-    json_data = resp.model_dump() if hasattr(resp, "model_dump") else resp
+    json_data = resp.model_dump()
     rows_out = []
     for ds in resp.datasets:
         rows_out.append([
-            ds.dataset_id[:8] + "...",
+            ds.dataset_id,
             ds.name,
             str(ds.row_count),
             ", ".join(ds.columns[:5]) + ("..." if len(ds.columns) > 5 else ""),

@@ -29,7 +29,7 @@ def list_datasets(
 
     rows = [
         [
-            d["dataset_id"][:8] + "...",
+            d["dataset_id"],
             d["name"],
             str(d["row_count"]),
             ", ".join(d["columns"][:5]) + ("..." if len(d["columns"]) > 5 else ""),

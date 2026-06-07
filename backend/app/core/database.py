@@ -37,8 +37,9 @@ class DuckDBManager:
                 return self._conn.execute(sql, params)
             return self._conn.execute(sql)
 
-    def get_connection(self) -> duckdb.DuckDBPyConnection:
-        return self._conn
+    def executemany(self, sql: str, params: list[list]) -> None:
+        with self._lock:
+            self._conn.executemany(sql, params)
 
     def close(self) -> None:
         self._conn.close()

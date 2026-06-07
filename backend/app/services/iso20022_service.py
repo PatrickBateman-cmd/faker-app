@@ -4,8 +4,8 @@ import json
 import random
 import re
 import time
-from datetime import datetime, timedelta
-from functools import lru_cache
+from datetime import datetime
+from logging import getLogger
 from urllib.parse import urljoin
 
 import httpx
@@ -13,6 +13,8 @@ from lxml import etree, html
 
 from app.core.database import DuckDBManager
 from app.schemas.iso20022 import DomainInfo, MessageInfo, ParsedField, XsdParsedResponse
+
+logger = getLogger(__name__)
 
 _CACHE_TTL_SECONDS = 3600
 
@@ -92,6 +94,7 @@ def _map_field_type(field_name: str, xsd_type: str | None, enumeration: list[str
     if xsd_type and "decimal" in xsd_type.lower():
         return "pydecimal"
 
+    logger.warning("Unrecognized field type (xsd=%s, name=%s), falling back to 'text'", xsd_type, field_name)
     return "text"
 
 
@@ -334,22 +337,16 @@ def search_messages(q: str) -> list[MessageInfo]:
     for m in _default_messages():
         match_and_add(m)
 
-    cached_extra = get_messages.cache_info().hits > 0
-    if cached_extra:
-        try:
-            for did in [d.id for d in get_domains()]:
-                for m in get_all_messages(domain_id=did):
-                    match_and_add(m)
-        except (httpx.TimeoutException, httpx.HTTPError):
-            pass
-
     results.sort(key=lambda m: (m.business_area, m.message_id))
     return results
 
 
+_SECURE_XSD_PARSER = etree.XMLParser(resolve_entities=False, no_network=True)
+
+
 def _parse_xsd_fields(xsd_content: str, message_id: str, message_name: str) -> XsdParsedResponse:
     try:
-        root = etree.fromstring(xsd_content.encode())
+        root = etree.fromstring(xsd_content.encode(), _SECURE_XSD_PARSER)
     except etree.XMLSyntaxError:
         return XsdParsedResponse(message_id=message_id, message_name=message_name, fields=[])
 

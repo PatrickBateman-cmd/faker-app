@@ -167,7 +167,9 @@ def get_template(name: str) -> Template | None:
 
 
 def get_template_by_filename(filename: str) -> Template | None:
-    file_path = TEMPLATES_DIR / filename
+    file_path = (TEMPLATES_DIR / filename).resolve()
+    if not str(file_path).startswith(str(TEMPLATES_DIR.resolve())):
+        return None
     if not file_path.exists() or file_path.suffix.lower() != ".xml":
         return None
     raw = file_path.read_text(encoding="utf-8")

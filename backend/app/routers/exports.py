@@ -1,6 +1,9 @@
+import logging
 import os
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
+
+logger = logging.getLogger(__name__)
 from fastapi.responses import FileResponse
 
 from app.services import export_service
@@ -12,8 +15,8 @@ def _cleanup(filepath: str) -> None:
     try:
         if os.path.exists(filepath):
             os.unlink(filepath)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Failed to clean up temp file %s: %s", filepath, e)
 
 
 @router.get("/{dataset_id}/export/csv")

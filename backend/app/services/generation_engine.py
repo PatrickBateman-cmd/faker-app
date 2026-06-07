@@ -4,11 +4,15 @@ import json
 import random
 import re
 import uuid
-from datetime import datetime, timedelta
+import logging
+
+from datetime import datetime
 
 from jinja2 import Template as JinjaTemplate
 
 from faker import Faker
+
+logger = logging.getLogger(__name__)
 
 from app.core.database import DuckDBManager
 from app.core.validation import validate_column_name, validate_table_name
@@ -44,19 +48,23 @@ def _check_condition(condition: str, row: list, fields: list) -> bool:
     except ValueError:
         val = raw_val.strip('"').strip("'")
 
-    if op == ">=":
-        return field_val >= val
-    elif op == "<=":
-        return field_val <= val
-    elif op == ">":
-        return field_val > val
-    elif op == "<":
-        return field_val < val
-    elif op == "==":
-        return field_val == val
-    elif op == "!=":
-        return field_val != val
-    return True
+    try:
+        if op == ">=":
+            return field_val >= val
+        elif op == "<=":
+            return field_val <= val
+        elif op == ">":
+            return field_val > val
+        elif op == "<":
+            return field_val < val
+        elif op == "==":
+            return field_val == val
+        elif op == "!=":
+            return field_val != val
+        return True
+    except TypeError:
+        logger.warning("Type mismatch in condition '%s': %s vs %s", condition, type(field_val).__name__, type(val).__name__)
+        return False
 
 
 def _apply_constraint(fake: Faker, value: object, constraint: ConstraintConfig | None) -> object:
@@ -163,6 +171,7 @@ def _generate_field_value(fake: Faker, field: FieldDefinition, constraint: Const
     elif gen == "word":
         return _apply_constraint(fake, fake.word(), cons)
     else:
+        logger.warning("Unknown generator '%s' for field '%s', falling back to fake.word()", gen, field.name)
         return _apply_constraint(fake, fake.word(), cons)
 
 
@@ -200,8 +209,7 @@ def _generate_dataset(
             ).fetchall()
             shared_key_pool = [row[0] for row in result]
         except Exception:
-            import logging
-            logging.getLogger(__name__).exception("Failed to load shared_key pool")
+            logger.exception("Failed to load shared_key pool")
             shared_key_pool = []
 
     field_fakers: list[Faker | None] = []
@@ -254,6 +262,7 @@ def _generate_dataset(
                         already = {f.name: row[idx] for idx, f in enumerate(fields[:fi])}
                         row.append(t.render(**already))
                     except Exception:
+                        logger.exception("Formula evaluation failed for field '%s'", field.name)
                         row.append(field.formula or "")
                     continue
 
@@ -263,7 +272,7 @@ def _generate_dataset(
 
             batch_data.append(row)
 
-        db.get_connection().executemany(insert_sql, batch_data)
+        db.executemany(insert_sql, batch_data)
 
     result = db.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()
     actual_count = result[0] if result else 0
@@ -308,6 +317,7 @@ def _infer_duckdb_types(fields: list[FieldDefinition]) -> list[str]:
         elif t in ("datetime", "timestamp"):
             type_map.append("TIMESTAMP")
         else:
+            logger.debug("Unrecognized field type '%s' for field '%s', falling back to VARCHAR", f.type, f.name)
             type_map.append("VARCHAR")
     return type_map
 
@@ -425,7 +435,7 @@ def _generate_grouped_dataset(
                 batch_data.append(parent_row + child_row + [parent_id])
 
                 if len(batch_data) >= batch_size:
-                    db.get_connection().executemany(insert_sql, batch_data)
+                    db.executemany(insert_sql, batch_data)
                     batch_data = []
 
     # Flat rows
@@ -435,11 +445,11 @@ def _generate_grouped_dataset(
         batch_data.append(parent_row + child_row + [None])
 
         if len(batch_data) >= batch_size:
-            db.get_connection().executemany(insert_sql, batch_data)
+            db.executemany(insert_sql, batch_data)
             batch_data = []
 
     if batch_data:
-        db.get_connection().executemany(insert_sql, batch_data)
+        db.executemany(insert_sql, batch_data)
 
     result = db.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()
     actual_count = result[0] if result else 0

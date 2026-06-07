@@ -1,3 +1,5 @@
+import logging
+
 import typer
 
 from app.services.iso20022_service import (
@@ -9,6 +11,8 @@ from app.services.iso20022_service import (
 )
 
 from cli.common import console, output_result
+
+logger = logging.getLogger(__name__)
 
 app = typer.Typer(help="ISO 20022 catalog", no_args_is_help=True)
 
@@ -167,10 +171,11 @@ def _xsd_to_field_type(xsd_type: str) -> str:
         return "float"
     if "integer" in base_lower or "int" in base_lower:
         return "integer"
-    if "date" in base_lower:
-        return "date"
     if "boolean" in base_lower:
         return "boolean"
     if "time" in base_lower:
         return "datetime"
+    if "date" in base_lower:
+        return "date"
+    logger.warning("Unrecognized XSD type '%s', falling back to 'string'", xsd_type)
     return "string"

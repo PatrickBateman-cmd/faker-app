@@ -47,5 +47,36 @@ Built a full-stack synthetic data generator (FastAPI + DuckDB + React 19) with I
 - `README.md` — project overview, setup, all features documented
 - `CHEATSHEET.md` — complete CLI + curl reference
 
-### Final commit
+### Final commits (Phase 1)
 `2e016ad` — 55 files, +3988/-390 lines
+
+---
+
+### 4. TUI — Textual Terminal UI (Phase 2)
+
+#### What was fixed
+- **Import fix**: `.venv/bin/faker` inserts `backend/` into `sys.path` via `os.path.abspath(os.path.join(__file__, "..", "..", ".."))` (hatchling `.pth` files unreliable).
+- **Screen navigation**: `switch_screen` replaces `push_screen` to avoid stacking duplicate screens; `DashboardScreen` removed from `App.compose()` to prevent keyboard event stealing.
+- **Widget kwargs**: `FieldRow` and `FieldList` now accept `**kwargs` → `super().__init__(**kwargs)`, fixing `unexpected keyword argument 'id'` errors.
+- **Catppuccin Mocha CSS**: `app.tcss` with `#1e1e2e` background, `#cdd6f4` text, `#89b4fa` accent, `#f38ba8` red, `#a6e3a1` green; scrollable screens, compact field rows, consistent button variants.
+
+#### Screens (all 6)
+| Screen   | Description |
+|----------|-------------|
+| Dashboard | 3 stat cards via DuckDB metadata |
+| Generation | Flat/grouped toggle, vim-mode field editor, calls `generate_datasets()` |
+| Datasets | Sidebar list, paginated table, export/delete |
+| Financial | Quote card + Braille-dot chart (`_braille_line()`), batch fetch |
+| Templates | Search + list from `template_library` |
+| ISO 20022 | Search + results from `iso20022_service` |
+
+#### Git history
+- `tui` branch pushed → merged fast-forward into `main` → pushed to origin.
+- Final commit `31866a2` — 18 files, +1270/-1 lines.
+
+### Known issues (carried forward)
+- Auth settings declared but not implemented.
+- Export dropdown click toggle closes on blur with 200ms delay.
+- Financial panel does not cache historical data across page navigations.
+- Some XSD `<xs:include>` / `<xs:import>` directives are ignored.
+- No frontend test coverage for components beyond ThemeSwitcher.

@@ -59,4 +59,5 @@ class DashboardScreen(Screen):
                 cards[1].update(f"[bold green]{tpl_count}[/]\n[dim]Total Templates[/]")
                 cards[2].update(f"[bold yellow]{row_sum:,}[/]\n[dim]Total Rows Generated[/]")
         except Exception:
-            pass
+            import logging
+            logging.getLogger(__name__).exception("Failed to load dashboard stats")

@@ -18,6 +18,21 @@ QUOTE_COLUMNS = [
     "dayLow", "volume", "marketCap", "currency",
 ]
 
+QUOTE_TYPES: dict[str, str] = {
+    "symbol": "VARCHAR",
+    "shortName": "VARCHAR",
+    "longName": "VARCHAR",
+    "regularMarketPrice": "DOUBLE",
+    "previousClose": "DOUBLE",
+    "change": "DOUBLE",
+    "changePercent": "DOUBLE",
+    "dayHigh": "DOUBLE",
+    "dayLow": "DOUBLE",
+    "volume": "BIGINT",
+    "marketCap": "DOUBLE",
+    "currency": "VARCHAR",
+}
+
 
 def _build_quote(symbol: str, info: dict, price: float, prev_close: float | None = None) -> dict:
     if prev_close is None:
@@ -92,7 +107,7 @@ def batch_to_dataset(symbols: list[str], name: str | None = None) -> DatasetResu
         validate_column_name(col)
 
     db = DuckDBManager.get_instance()
-    col_defs = ", ".join(f'"{c}" VARCHAR' for c in QUOTE_COLUMNS)
+    col_defs = ", ".join(f'"{c}" {QUOTE_TYPES.get(c, "VARCHAR")}' for c in QUOTE_COLUMNS)
     db.execute(f'CREATE TABLE "{table_name}" ({col_defs})')
 
     rows: list[list[str | float | int | None]] = []
@@ -111,7 +126,7 @@ def batch_to_dataset(symbols: list[str], name: str | None = None) -> DatasetResu
 
     placeholders = ", ".join("?" for _ in QUOTE_COLUMNS)
     quoted_cols = ", ".join(f'"{c}"' for c in QUOTE_COLUMNS)
-    db.get_connection().executemany(
+    db.executemany(
         f'INSERT INTO "{table_name}" ({quoted_cols}) VALUES ({placeholders})',
         rows,
     )
@@ -176,17 +191,24 @@ def enrich_dataset(
             continue
 
     enrich_cols = [validate_column_name(e.field_name) for e in parsed]
-    source_cols = [
-        desc[0]
-        for desc in db.execute(f'SELECT * FROM "{table_name}" LIMIT 0').description
-    ]
+
+    source_desc = db.execute(f'DESCRIBE "{table_name}"').fetchall()
+    source_cols = [r[0] for r in source_desc]
+    source_types = {r[0]: r[1] for r in source_desc}
+
+    col_types: dict[str, str] = {}
+    for c in source_cols:
+        col_types[c] = source_types.get(c, "VARCHAR")
+    for c in enrich_cols:
+        col_types[c] = QUOTE_TYPES.get(c, "VARCHAR")
+
     all_cols = source_cols + enrich_cols
 
     dataset_id = str(uuid.uuid4())
     result_table = f"dataset_{dataset_id}"
     validate_table_name(result_table)
 
-    col_defs = ", ".join(f'"{c}" VARCHAR' for c in all_cols)
+    col_defs = ", ".join(f'"{c}" {col_types[c]}' for c in all_cols)
     db.execute(f'CREATE TABLE "{result_table}" ({col_defs})')
 
     source_rows = db.execute(f'SELECT * FROM "{table_name}"').fetchall()
@@ -201,7 +223,7 @@ def enrich_dataset(
 
     placeholders = ", ".join("?" for _ in all_cols)
     quoted_cols = ", ".join(f'"{c}"' for c in all_cols)
-    db.get_connection().executemany(
+    db.executemany(
         f'INSERT INTO "{result_table}" ({quoted_cols}) VALUES ({placeholders})',
         batch,
     )
@@ -234,11 +256,20 @@ def batch_history(symbols: list[str], period: str = "1mo", interval: str = "1d",
     validate_table_name(table_name)
 
     HISTORY_COLUMNS = ["symbol", "date", "open", "high", "low", "close", "volume"]
+    HISTORY_TYPES: dict[str, str] = {
+        "symbol": "VARCHAR",
+        "date": "VARCHAR",
+        "open": "DOUBLE",
+        "high": "DOUBLE",
+        "low": "DOUBLE",
+        "close": "DOUBLE",
+        "volume": "BIGINT",
+    }
     for col in HISTORY_COLUMNS:
         validate_column_name(col)
 
     db = DuckDBManager.get_instance()
-    col_defs = ", ".join(f'"{c}" VARCHAR' for c in HISTORY_COLUMNS)
+    col_defs = ", ".join(f'"{c}" {HISTORY_TYPES.get(c, "VARCHAR")}' for c in HISTORY_COLUMNS)
     db.execute(f'CREATE TABLE "{table_name}" ({col_defs})')
 
     all_rows: list[list[str | float | int]] = []
@@ -267,7 +298,7 @@ def batch_history(symbols: list[str], period: str = "1mo", interval: str = "1d",
 
     placeholders = ", ".join("?" for _ in HISTORY_COLUMNS)
     quoted_cols = ", ".join(f'"{c}"' for c in HISTORY_COLUMNS)
-    db.get_connection().executemany(
+    db.executemany(
         f'INSERT INTO "{table_name}" ({quoted_cols}) VALUES ({placeholders})',
         all_rows,
     )

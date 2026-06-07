@@ -81,40 +81,6 @@ function emptyField(): FieldDef {
   return { name: "", generator: "text", type: "string", unique: false };
 }
 
-  function emptyGroupConfig(): GroupConfig {
-    return {
-      num_groups: 4,
-      split_pct: 100,
-      parent_fields: [emptyField()],
-      child_fields: [emptyField()],
-    };
-  }
-
-  function switchMode(newMode: "flat" | "grouped") {
-    setMode(newMode);
-    setDatasets((prev) =>
-      prev.map((d) => {
-        if (newMode === "grouped" && !d.group_config) {
-          return { ...d, group_config: emptyGroupConfig() };
-        }
-        if (newMode === "flat") {
-          const { group_config, ...rest } = d;
-          return rest;
-        }
-        return d;
-      })
-    );
-    setResults(null);
-  }
-
-  function emptyDataset(name?: string): DatasetDefinition {
-    return {
-      name: name || "",
-      rows: 100,
-      fields: [emptyField()],
-    };
-  }
-
 export function GenerationControls({ onNavigate, pendingTemplate: externalTemplate }: { onNavigate?: (page: string) => void; pendingTemplate?: string | null }) {
   const [datasetCount, setDatasetCount] = useState(1);
   const [datasets, setDatasets] = useState<DatasetDefinition[]>([emptyDataset("Dataset 1")]);
@@ -134,6 +100,39 @@ export function GenerationControls({ onNavigate, pendingTemplate: externalTempla
       setResults(data.datasets);
     },
   });
+
+  function emptyDataset(name?: string): DatasetDefinition {
+    return {
+      name: name || "",
+      rows: 100,
+      fields: [emptyField()],
+    };
+  }
+
+  function switchMode(newMode: "flat" | "grouped") {
+    setMode(newMode);
+    setDatasets((prev) =>
+      prev.map((d) => {
+        if (newMode === "grouped" && !d.group_config) {
+          return {
+            ...d,
+            group_config: {
+              num_groups: 4,
+              split_pct: 100,
+              parent_fields: d.fields.length > 0 ? d.fields : [emptyField()],
+              child_fields: [emptyField()],
+            },
+          };
+        }
+        if (newMode === "flat") {
+          const { group_config, ...rest } = d;
+          return rest;
+        }
+        return d;
+      })
+    );
+    setResults(null);
+  }
 
   function handleDatasetCountChange(count: number) {
     const c = Math.max(1, Math.min(4, count));
@@ -184,20 +183,28 @@ export function GenerationControls({ onNavigate, pendingTemplate: externalTempla
     }));
   }
 
+  function _mapTemplateFields(t: { fields: any[] }) {
+    return t.fields.map((f) => ({
+      name: f.name,
+      generator: f.generator,
+      type: f.type,
+      unique: f.unique,
+      formula: f.formula,
+      constraint: f.constraint || null,
+    }));
+  }
+
   function applyTemplate(dsIndex: number, templateName: string) {
     fetchTemplate(templateName).then((t) => {
+      const mapped = _mapTemplateFields(t);
       updateDataset(dsIndex, (d) => ({
         ...d,
         name: t.name,
         template: t.name,
-        fields: t.fields.map((f) => ({
-          name: f.name,
-          generator: f.generator,
-          type: f.type,
-          unique: f.unique,
-          formula: f.formula,
-          constraint: f.constraint || null,
-        })),
+        fields: mapped,
+        group_config: d.group_config
+          ? { ...d.group_config, parent_fields: mapped, child_fields: [] }
+          : d.group_config,
       }));
     });
   }
@@ -492,20 +499,51 @@ export function GenerationControls({ onNavigate, pendingTemplate: externalTempla
                         ))}
                       </SortableContext>
                     </DndContext>
-                    <button
-                      onClick={() => {
-                        const gc = datasets[dsIndex].group_config;
-                        if (gc) {
-                          updateDataset(dsIndex, (d) => ({
-                            ...d,
-                            group_config: { ...gc, child_fields: [...gc.child_fields, emptyField()] },
-                          }));
-                        }
-                      }}
-                      className="self-start text-xs text-[var(--muted)] hover:text-[var(--text)]"
-                    >
-                      + Add child field
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => {
+                          const gc = datasets[dsIndex].group_config;
+                          if (gc) {
+                            updateDataset(dsIndex, (d) => ({
+                              ...d,
+                              group_config: { ...gc, child_fields: [...gc.child_fields, emptyField()] },
+                            }));
+                          }
+                        }}
+                        className="text-xs text-[var(--muted)] hover:text-[var(--text)]"
+                      >
+                        + Add child field
+                      </button>
+                      {ds.group_config.parent_fields.length > 0 && (
+                        <select
+                          onChange={(e) => {
+                            const name = e.target.value;
+                            if (!name) return;
+                            e.target.value = "";
+                            const gc = datasets[dsIndex].group_config;
+                            if (!gc) return;
+                            const idx = gc.parent_fields.findIndex((f: FieldDef) => f.name === name);
+                            if (idx === -1) return;
+                            const field = gc.parent_fields[idx];
+                            updateDataset(dsIndex, (d) => ({
+                              ...d,
+                              group_config: {
+                                ...gc,
+                                parent_fields: gc.parent_fields.filter((_: FieldDef, i: number) => i !== idx),
+                                child_fields: [...gc.child_fields, field],
+                              },
+                            }));
+                          }}
+                          value=""
+                          className="bg-[var(--elevated)] border border-[var(--border)] rounded px-1.5 py-0.5 text-xs text-[var(--muted)]"
+                        >
+                          <option value="" disabled>Move from parent…</option>
+                          {ds.group_config.parent_fields.map((pf: FieldDef) => (
+                            <option key={pf.name} value={pf.name}>{pf.name}</option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
                   </div>
                 </div>
               </>
