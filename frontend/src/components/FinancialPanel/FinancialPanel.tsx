@@ -61,9 +61,9 @@ export function FinancialPanel({ onNavigate }: { onNavigate?: (page: string) => 
     enabled: !!symbol,
   });
 
-  const batchMut = useMutation({
-    mutationFn: batchMode === "snapshot" ? batchFetchToDataset : fetchBatchHistory,
-  });
+  const snapshotMut = useMutation({ mutationFn: batchFetchToDataset });
+  const historyMut = useMutation({ mutationFn: fetchBatchHistory });
+  const batchMut = batchMode === "snapshot" ? snapshotMut : historyMut;
 
   const datasetsQuery = useQuery({
     queryKey: ["datasets"],
@@ -114,9 +114,9 @@ export function FinancialPanel({ onNavigate }: { onNavigate?: (page: string) => 
       .filter(Boolean);
     if (symbols.length === 0) return;
     if (batchMode === "snapshot") {
-      batchMut.mutate({ symbols, name: batchName || null });
+      snapshotMut.mutate({ symbols, name: batchName || null });
     } else {
-      batchMut.mutate({ symbols, period: batchPeriod, interval: batchInterval, name: batchName || null });
+      historyMut.mutate({ symbols, period: batchPeriod, interval: batchInterval, name: batchName || null });
     }
   }
 

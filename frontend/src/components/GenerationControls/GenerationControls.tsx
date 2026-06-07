@@ -1,4 +1,4 @@
-import { DndContext, closestCenter, type DragEndEvent } from "@dnd-kit/core";
+import { DndContext, closestCenter } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -9,7 +9,6 @@ import type {
   DatasetDefinition,
   DatasetResult,
   FieldDef,
-  GroupConfig,
   TemplateSummary,
 } from "../../types/generation";
 

@@ -34,7 +34,6 @@ export function DatasetChart({ datasetId }: DatasetChartProps) {
   );
 
   const rows = rowsData?.rows || [];
-  const total = rowsData?.total || 0;
 
   if (!xAxis && categoricalColumns.length > 0) setXAxis(categoricalColumns[0].name);
   if (!yAxis && numericColumns.length > 0) setYAxis(numericColumns[0].name);
