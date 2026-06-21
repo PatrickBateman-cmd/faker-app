@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import threading
+from contextlib import contextmanager
 from pathlib import Path
 
 import duckdb
@@ -9,7 +10,7 @@ import duckdb
 
 class DuckDBManager:
     _instance: DuckDBManager | None = None
-    _lock = threading.Lock()
+    _lock = threading.RLock()  # RLock allows transaction() to hold lock while execute() re-enters
 
     def __init__(self, db_path: str) -> None:
         self.db_path = db_path
@@ -40,6 +41,22 @@ class DuckDBManager:
     def executemany(self, sql: str, params: list[list]) -> None:
         with self._lock:
             self._conn.executemany(sql, params)
+
+    @contextmanager
+    def transaction(self):
+        """Hold the write lock for an entire multi-statement transaction.
+
+        Prevents other threads from interleaving statements between BEGIN and COMMIT.
+        Uses RLock so execute() calls within the block don't deadlock.
+        """
+        with self._lock:
+            self._conn.execute("BEGIN")
+            try:
+                yield
+                self._conn.execute("COMMIT")
+            except Exception:
+                self._conn.execute("ROLLBACK")
+                raise
 
     def close(self) -> None:
         self._conn.close()

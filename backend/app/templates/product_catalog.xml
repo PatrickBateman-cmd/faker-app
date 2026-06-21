@@ -1,0 +1,36 @@
+<template name="Product Catalog" category="Retail">
+  <meta description="Product inventory record with pricing, stock, and categorisation" version="1.0"/>
+  <field name="product_id" type="string" generator="uuid4" unique="true"/>
+  <field name="sku" type="string" generator="bothify">
+    <constraint format="SKU-????-####"/>
+  </field>
+  <field name="name" type="string" generator="catch_phrase"/>
+  <field name="brand" type="string" generator="company"/>
+  <field name="category" type="string" generator="random_element">
+    <constraint values="Electronics,Clothing,Home &amp; Garden,Sports,Books,Toys,Beauty,Automotive,Food &amp; Beverage,Office Supplies"/>
+  </field>
+  <field name="subcategory" type="string" generator="random_element">
+    <constraint values="Accessories,New Arrivals,Best Sellers,Clearance,Bundle,Limited Edition,Refurbished,Exclusive"/>
+  </field>
+  <field name="unit_price" type="float" generator="pydecimal">
+    <constraint min="1" max="5000" right_digits="2"/>
+  </field>
+  <field name="cost_price" type="float" generator="pydecimal">
+    <constraint min="1" max="2500" right_digits="2"/>
+  </field>
+  <field name="currency" type="string" generator="currency_code"/>
+  <field name="stock_quantity" type="integer" generator="random_int">
+    <constraint min="0" max="10000"/>
+  </field>
+  <field name="reorder_threshold" type="integer" generator="random_int">
+    <constraint min="5" max="200"/>
+  </field>
+  <field name="weight_kg" type="float" generator="pydecimal">
+    <constraint min="0.01" max="50" right_digits="2"/>
+  </field>
+  <field name="country_of_origin" type="string" generator="country"/>
+  <field name="is_active" type="boolean" generator="boolean"/>
+  <field name="created_at" type="date" generator="date_between">
+    <constraint start="-3y" end="today"/>
+  </field>
+</template>

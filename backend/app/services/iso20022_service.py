@@ -6,7 +6,7 @@ import re
 import time
 from datetime import datetime
 from logging import getLogger
-from urllib.parse import urljoin
+from urllib.parse import urlparse, urljoin
 
 import httpx
 from lxml import etree, html
@@ -23,6 +23,8 @@ CATALOG_URL = f"{CATALOG_BASE}/iso-20022-message-definitions"
 
 _HTTP_CLIENT: httpx.Client | None = None
 
+_ALLOWED_XSD_HOSTS = {"www.iso20022.org", "iso20022.org"}
+
 
 def _get_client() -> httpx.Client:
     global _HTTP_CLIENT
@@ -32,6 +34,13 @@ def _get_client() -> httpx.Client:
             headers={"User-Agent": "FakerApp/0.1"},
         )
     return _HTTP_CLIENT
+
+
+def close_client() -> None:
+    global _HTTP_CLIENT
+    if _HTTP_CLIENT is not None:
+        _HTTP_CLIENT.close()
+        _HTTP_CLIENT = None
 
 NSMAP = {
     "xs": "http://www.w3.org/2001/XMLSchema",
@@ -137,6 +146,9 @@ def _cache_set(key: str, data: object) -> None:
 
 def _fetch_xsd(url: str) -> str:
     full_url = url if url.startswith("http") else urljoin(CATALOG_BASE, url)
+    parsed = urlparse(full_url)
+    if parsed.netloc not in _ALLOWED_XSD_HOSTS:
+        raise ValueError(f"Refusing to fetch XSD from off-host URL: {full_url}")
     return _fetch_page(full_url)
 
 

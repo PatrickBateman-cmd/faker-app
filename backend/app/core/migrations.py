@@ -73,6 +73,18 @@ MIGRATIONS: list[tuple[str, str]] = [
         ALTER TABLE metadata_runs ADD COLUMN IF NOT EXISTS template_name VARCHAR;
     """,
     ),
+    (
+        "005_dataset_source",
+        """
+        ALTER TABLE metadata_datasets ADD COLUMN IF NOT EXISTS source VARCHAR;
+    """,
+    ),
+    (
+        "006_aggregation_sequence",
+        """
+        CREATE SEQUENCE IF NOT EXISTS seq_aggregation_id START 1;
+    """,
+    ),
 ]
 
 
@@ -94,28 +106,21 @@ def _get_applied_migrations(conn: duckdb.DuckDBPyConnection | None = None) -> se
 
 
 def run_migrations(conn: duckdb.DuckDBPyConnection | None = None) -> None:
+    raw = conn if conn is not None else DuckDBManager.get_instance()._conn
     applied = _get_applied_migrations(conn=conn)
     for name, sql in MIGRATIONS:
         if name not in applied:
             logger.info("Applying migration: %s", name)
+            raw.execute("BEGIN")
             try:
-                for statement in sql.strip().split(";"):
-                    stmt = statement.strip()
-                    if stmt:
-                        if conn is None:
-                            db = DuckDBManager.get_instance()
-                        else:
-                            db = conn
-                        db.execute(stmt)
-                if conn is None:
-                    db = DuckDBManager.get_instance()
-                else:
-                    db = conn
-                db.execute(
-                    "INSERT INTO metadata_schema_version (version) VALUES (?)",
-                    [name],
+                for stmt in (s.strip() for s in sql.strip().split(";") if s.strip()):
+                    raw.execute(stmt)
+                raw.execute(
+                    "INSERT INTO metadata_schema_version (version) VALUES (?)", [name]
                 )
+                raw.execute("COMMIT")
                 logger.info("Migration '%s' applied successfully", name)
             except Exception as e:
-                logger.error("Migration '%s' failed: %s", name, e)
+                raw.execute("ROLLBACK")
+                logger.error("Migration '%s' failed, rolled back: %s", name, e)
                 raise

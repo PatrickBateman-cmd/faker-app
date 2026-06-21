@@ -105,6 +105,7 @@ def delete_dataset(dataset_id: str) -> bool:
     db = DuckDBManager.get_instance()
     table_name = validate_table_name(meta["table_name"])
     db.execute(f'DROP TABLE IF EXISTS "{table_name}"')
+    db.execute("DELETE FROM metadata_aggregations WHERE source_dataset = ?", [dataset_id])
     db.execute("DELETE FROM metadata_datasets WHERE dataset_id = ?", [dataset_id])
     return True
 

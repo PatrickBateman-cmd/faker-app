@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     max_rows_per_dataset: int = 100000
     max_datasets_per_run: int = 4
 
+    kaggle_username: str = ""
+    kaggle_key: str = ""
+    kaggle_api_token: str = ""
+
     model_config = SettingsConfigDict(
         env_file=Path(__file__).parent.parent.parent / ".env",
         env_file_encoding="utf-8",

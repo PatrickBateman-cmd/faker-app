@@ -1,0 +1,37 @@
+<template name="Patient Record" category="Healthcare">
+  <meta description="Healthcare patient record with demographics and clinical details" version="1.0"/>
+  <field name="patient_id" type="string" generator="uuid4" unique="true"/>
+  <field name="first_name" type="string" generator="first_name"/>
+  <field name="last_name" type="string" generator="last_name"/>
+  <field name="date_of_birth" type="date" generator="date_of_birth">
+    <constraint min_age="0" max_age="99"/>
+  </field>
+  <field name="gender" type="string" generator="random_element">
+    <constraint values="Male,Female,Non-binary,Prefer not to say"/>
+  </field>
+  <field name="blood_type" type="string" generator="random_element">
+    <constraint values="A+,A-,B+,B-,AB+,AB-,O+,O-"/>
+  </field>
+  <field name="email" type="string" generator="email"/>
+  <field name="phone" type="string" generator="phone_number"/>
+  <field name="country" type="string" generator="country"/>
+  <field name="city" type="string" generator="city"/>
+  <field name="address" type="string" generator="street_address"/>
+  <field name="insurance_provider" type="string" generator="company"/>
+  <field name="insurance_policy_number" type="string" generator="bothify">
+    <constraint format="POL-####-????"/>
+  </field>
+  <field name="primary_diagnosis" type="string" generator="random_element">
+    <constraint values="Hypertension,Type 2 Diabetes,Asthma,Anxiety,Depression,Hyperlipidemia,Osteoarthritis,Obesity,GERD,Migraine"/>
+  </field>
+  <field name="admission_date" type="date" generator="date_between">
+    <constraint start="-2y" end="today"/>
+  </field>
+  <field name="discharge_date" type="date" generator="date_between">
+    <constraint start="-2y" end="today"/>
+  </field>
+  <field name="ward" type="string" generator="random_element">
+    <constraint values="General,ICU,Paediatrics,Oncology,Cardiology,Orthopaedics,Emergency,Outpatient"/>
+  </field>
+  <field name="is_emergency" type="boolean" generator="boolean"/>
+</template>

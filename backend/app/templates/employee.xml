@@ -1,0 +1,30 @@
+<template name="Employee" category="HR">
+  <meta description="Employee HR record with personal, role, and payroll details" version="1.0"/>
+  <field name="employee_id" type="string" generator="uuid4" unique="true"/>
+  <field name="first_name" type="string" generator="first_name"/>
+  <field name="last_name" type="string" generator="last_name"/>
+  <field name="email" type="string" generator="formula"
+         formula="{{ first_name|lower }}.{{ last_name|lower }}@corp.example.com"/>
+  <field name="phone" type="string" generator="phone_number"/>
+  <field name="department" type="string" generator="random_element">
+    <constraint values="Engineering,Product,Marketing,Sales,Finance,HR,Legal,Operations,Customer Support,Data"/>
+  </field>
+  <field name="job_title" type="string" generator="job"/>
+  <field name="seniority" type="string" generator="random_element">
+    <constraint values="Junior,Mid,Senior,Lead,Principal,Director,VP,C-Level"/>
+  </field>
+  <field name="employment_type" type="string" generator="random_element">
+    <constraint values="Full-Time,Part-Time,Contract,Intern,Freelance"/>
+  </field>
+  <field name="hire_date" type="date" generator="date_between">
+    <constraint start="-10y" end="today"/>
+  </field>
+  <field name="salary" type="float" generator="pydecimal">
+    <constraint min="30000" max="250000" right_digits="2"/>
+  </field>
+  <field name="currency" type="string" generator="currency_code"/>
+  <field name="country" type="string" generator="country"/>
+  <field name="city" type="string" generator="city"/>
+  <field name="remote" type="boolean" generator="boolean"/>
+  <field name="is_active" type="boolean" generator="boolean"/>
+</template>

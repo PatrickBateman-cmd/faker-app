@@ -7,7 +7,8 @@ from fastapi.responses import JSONResponse
 
 from app.config import settings
 from app.core.database import DuckDBManager
-from app.routers import aggregation, datasets, exports, financial, generation, health, iso20022, templates
+from app.routers import aggregation, datasets, exports, financial, generation, health, iso20022, kaggle, templates
+from app.services import iso20022_service
 from app.services.template_library import _init_sample_templates
 
 logger = getLogger(__name__)
@@ -18,6 +19,7 @@ async def lifespan(app: FastAPI):
     DuckDBManager.initialize(db_path=settings.duckdb_path)
     _init_sample_templates()
     yield
+    iso20022_service.close_client()
     DuckDBManager.close_instance()
 
 
@@ -27,12 +29,14 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+_cors_origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins.split(","),
+    allow_origins=_cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "Accept"],
 )
 
 app.include_router(health.router, prefix="")
@@ -43,6 +47,7 @@ app.include_router(datasets.router, prefix="")
 app.include_router(aggregation.router, prefix="")
 app.include_router(exports.router, prefix="")
 app.include_router(financial.router, prefix="")
+app.include_router(kaggle.router, prefix="")
 
 
 @app.exception_handler(Exception)

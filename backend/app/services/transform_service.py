@@ -86,8 +86,8 @@ def aggregate_dataset(
 
     db.execute(
         """
-        INSERT INTO metadata_aggregations (source_dataset, name, config_json)
-        VALUES (?, ?, ?)
+        INSERT INTO metadata_aggregations (id, source_dataset, name, config_json)
+        VALUES (nextval('seq_aggregation_id'), ?, ?, ?)
         """,
         [source_dataset_id, request.name, json.dumps(request.model_dump())],
     )
@@ -136,20 +136,17 @@ def dedup_dataset(
     result_table = f"dataset_{result_id}"
 
     if request.strategy == "keep_none":
-        join_conditions = " AND ".join(
-            f'sub2."{validate_column_name(c)}" = sub."{validate_column_name(c)}"'
-            for c in request.keys
-        )
+        key_quoted_list = [f'"{validate_column_name(c)}"' for c in request.keys]
+        key_tuple = f"({', '.join(key_quoted_list)})"
+        group_by_clause = ", ".join(key_quoted_list)
         sql = f"""
             CREATE TABLE "{result_table}" AS
-            SELECT {col_list} FROM (
-                SELECT *, {window_sql} FROM "{table_name}"
-            ) sub
-            WHERE _rn = 1
-            AND (SELECT COUNT(*) FROM (
-                SELECT 1 FROM "{table_name}" sub2
-                WHERE {join_conditions}
-            )) = 1
+            SELECT {col_list} FROM "{table_name}"
+            WHERE {key_tuple} IN (
+                SELECT {key_tuple} FROM "{table_name}"
+                GROUP BY {group_by_clause}
+                HAVING COUNT(*) = 1
+            )
         """
     else:
         sql = f"""
@@ -169,8 +166,8 @@ def dedup_dataset(
 
     db.execute(
         """
-        INSERT INTO metadata_aggregations (source_dataset, name, config_json)
-        VALUES (?, ?, ?)
+        INSERT INTO metadata_aggregations (id, source_dataset, name, config_json)
+        VALUES (nextval('seq_aggregation_id'), ?, ?, ?)
         """,
         [source_dataset_id, request.name, json.dumps(request.model_dump())],
     )

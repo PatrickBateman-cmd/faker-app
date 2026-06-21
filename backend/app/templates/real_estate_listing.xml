@@ -1,0 +1,48 @@
+<template name="Real Estate Listing" category="Real Estate">
+  <meta description="Property listing with location, specs, pricing, and agent details" version="1.0"/>
+  <field name="listing_id" type="string" generator="uuid4" unique="true"/>
+  <field name="reference" type="string" generator="bothify">
+    <constraint format="RE-####-????"/>
+  </field>
+  <field name="property_type" type="string" generator="random_element">
+    <constraint values="Apartment,House,Condo,Townhouse,Villa,Studio,Penthouse,Commercial,Land,Warehouse"/>
+  </field>
+  <field name="listing_type" type="string" generator="random_element">
+    <constraint values="Sale,Rent,Lease,Auction"/>
+  </field>
+  <field name="price" type="float" generator="pydecimal">
+    <constraint min="50000" max="10000000" right_digits="2"/>
+  </field>
+  <field name="currency" type="string" generator="currency_code"/>
+  <field name="bedrooms" type="integer" generator="random_int">
+    <constraint min="0" max="10"/>
+  </field>
+  <field name="bathrooms" type="integer" generator="random_int">
+    <constraint min="1" max="6"/>
+  </field>
+  <field name="area_sqm" type="float" generator="pydecimal">
+    <constraint min="20" max="1000" right_digits="1"/>
+  </field>
+  <field name="floor" type="integer" generator="random_int">
+    <constraint min="0" max="50"/>
+  </field>
+  <field name="year_built" type="integer" generator="random_int">
+    <constraint min="1900" max="2024"/>
+  </field>
+  <field name="country" type="string" generator="country"/>
+  <field name="city" type="string" generator="city"/>
+  <field name="address" type="string" generator="street_address"/>
+  <field name="zip_code" type="string" generator="zipcode"/>
+  <field name="agent_name" type="string" generator="name"/>
+  <field name="agent_email" type="string" generator="email"/>
+  <field name="agent_phone" type="string" generator="phone_number"/>
+  <field name="status" type="string" generator="random_element">
+    <constraint values="Active,Under Offer,Sold,Withdrawn,Let Agreed,Off Market"/>
+  </field>
+  <field name="listed_date" type="date" generator="date_between">
+    <constraint start="-6m" end="today"/>
+  </field>
+  <field name="has_parking" type="boolean" generator="boolean"/>
+  <field name="has_garden" type="boolean" generator="boolean"/>
+  <field name="is_furnished" type="boolean" generator="boolean"/>
+</template>

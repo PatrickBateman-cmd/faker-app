@@ -2,6 +2,28 @@
 
 Comprehensive code audit conducted June 2026. 72 issues found across Critical / High / Medium / Low severities.
 
+## Second audit + fixes applied (June 2026)
+
+A senior-code-reviewer pass found 40 additional issues (10 previously missed by the first audit). The following were fixed immediately:
+
+| # | Fix | Files |
+|---|---|---|
+| R1 | **Template path traversal** — `_template_path()` validates name regex + confines to `TEMPLATES_DIR` | `template_library.py` |
+| R2 | **Export COPY path** — temp files use `secrets.token_hex(16)`; service now returns `(filepath, download_name)` tuple | `export_service.py`, `routers/exports.py`, `tests/test_export.py` |
+| R3 | **Kaggle `LIMIT` injection** — replaced `LIMIT {n}` with parameterized `LIMIT ?` | `kaggle_service.py` |
+| R4 | **Migration atomicity** — each migration wrapped in `BEGIN`/`COMMIT`/`ROLLBACK` on the raw connection | `migrations.py` |
+| R5 | **Aggregation sequence collision** — added `006_aggregation_sequence` migration (`seq_aggregation_id`); all aggregation INSERTs use `nextval('seq_aggregation_id')` | `migrations.py`, `transform_service.py` |
+| R6 | **CORS origins** — `.strip()` each entry; explicit `allow_methods`/`allow_headers` (no wildcards with credentials) | `main.py` |
+| R7 | **Template sync transaction** — `BEGIN`/`COMMIT` replaced by `db.transaction()`; `Lock` → `RLock` for re-entrance | `database.py`, `template_library.py` |
+| R8 | **Cascading delete** — `delete_dataset` now also deletes from `metadata_aggregations` | `dataset_service.py` |
+| R9 | **httpx client lifecycle** — `close_client()` added to `iso20022_service`; called in FastAPI lifespan | `iso20022_service.py`, `main.py` |
+| R10 | **`keep_none` dedup** — broken correlated subquery replaced with `HAVING COUNT(*) = 1` | `transform_service.py` |
+| R11 | **SSRF in XSD fetch** — host allowlist `{www.iso20022.org, iso20022.org}` added to `_fetch_xsd()` | `iso20022_service.py` |
+
+Remaining high-priority items from the second audit (not yet fixed): sequential yfinance batch calls (#11), `enrich_dataset` full-table load (#10), formula + null interaction (#12), global `random.seed()` race (#26).
+
+---
+
 ---
 
 ## Phase 1 — Critical: Security & Stability (~2–3h)

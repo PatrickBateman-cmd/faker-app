@@ -1,0 +1,40 @@
+<template name="IoT Sensor Event" category="Technology">
+  <meta description="IoT device sensor reading with telemetry and location metadata" version="1.0"/>
+  <field name="event_id" type="string" generator="uuid4" unique="true"/>
+  <field name="device_id" type="string" generator="bothify">
+    <constraint format="DEV-????-########"/>
+  </field>
+  <field name="device_type" type="string" generator="random_element">
+    <constraint values="Temperature Sensor,Humidity Sensor,Pressure Sensor,Motion Detector,Air Quality Monitor,Power Meter,GPS Tracker,Light Sensor,Vibration Sensor,CO2 Sensor"/>
+  </field>
+  <field name="manufacturer" type="string" generator="company"/>
+  <field name="firmware_version" type="string" generator="bothify">
+    <constraint format="#.##.##"/>
+  </field>
+  <field name="location_name" type="string" generator="city"/>
+  <field name="latitude" type="float" generator="pydecimal">
+    <constraint min="-90" max="90" right_digits="6"/>
+  </field>
+  <field name="longitude" type="float" generator="pydecimal">
+    <constraint min="-180" max="180" right_digits="6"/>
+  </field>
+  <field name="value" type="float" generator="pydecimal">
+    <constraint min="-50" max="10000" right_digits="3"/>
+  </field>
+  <field name="unit" type="string" generator="random_element">
+    <constraint values="°C,°F,%,hPa,ppm,lux,W,kWh,m/s,dB"/>
+  </field>
+  <field name="status" type="string" generator="random_element">
+    <constraint values="OK,Warning,Critical,Offline,Maintenance"/>
+  </field>
+  <field name="battery_level" type="integer" generator="random_int">
+    <constraint min="0" max="100"/>
+  </field>
+  <field name="signal_strength_dbm" type="integer" generator="random_int">
+    <constraint min="-120" max="-30"/>
+  </field>
+  <field name="timestamp" type="date" generator="date_between">
+    <constraint start="-30d" end="today"/>
+  </field>
+  <field name="is_anomaly" type="boolean" generator="boolean"/>
+</template>

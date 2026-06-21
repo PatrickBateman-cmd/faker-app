@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 import defusedxml.ElementTree as ET
@@ -18,6 +19,24 @@ from app.schemas.template import (
 TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 
 _cache: dict[str, tuple[float, list[Template]]] = {}
+
+# Only alphanumeric, spaces, dots, hyphens, underscores; must start with alphanumeric
+_SAFE_TEMPLATE_NAME = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9 ._\-]{0,79}$")
+
+
+def _template_path(name: str) -> Path:
+    """Return a safe filesystem path for a template name, raising on invalid input."""
+    if not _SAFE_TEMPLATE_NAME.match(name):
+        raise ValueError(
+            f"Invalid template name {name!r}: must start with alphanumeric and "
+            "contain only letters, digits, spaces, dots, hyphens, or underscores (max 80 chars)"
+        )
+    slug = re.sub(r"[^a-z0-9_]", "_", name.lower())
+    path = (TEMPLATES_DIR / f"{slug}.xml").resolve()
+    resolved_dir = TEMPLATES_DIR.resolve()
+    if not str(path).startswith(str(resolved_dir) + os.sep):
+        raise ValueError("Template path escapes the templates directory")
+    return path
 
 
 def _parse_field(element: ET.Element) -> FieldDef:
@@ -130,17 +149,13 @@ def _load_templates_from_disk() -> list[Template]:
 
 def _sync_to_duckdb(templates: list[Template]) -> None:
     db = DuckDBManager.get_instance()
-    db.execute("BEGIN TRANSACTION")
-    db.execute("DELETE FROM metadata_templates")
-    for t in templates:
-        db.execute(
-            """
-            INSERT INTO metadata_templates (name, category, description, xml_content)
-            VALUES (?, ?, ?, ?)
-            """,
-            [t.name, t.category, t.meta.description, ""],
-        )
-    db.execute("COMMIT")
+    with db.transaction():
+        db.execute("DELETE FROM metadata_templates")
+        for t in templates:
+            db.execute(
+                "INSERT INTO metadata_templates (name, category, description, xml_content) VALUES (?, ?, ?, ?)",
+                [t.name, t.category, t.meta.description, ""],
+            )
     _cache.clear()
 
 
@@ -181,7 +196,7 @@ def get_template_by_filename(filename: str) -> Template | None:
 
 def create_template(xml_content: str) -> Template:
     template = _parse_template_xml(xml_content)
-    file_path = TEMPLATES_DIR / f"{template.name.lower().replace(' ', '_')}.xml"
+    file_path = _template_path(template.name)
     if file_path.exists():
         msg = f"Template '{template.name}' already exists"
         raise ValueError(msg)
@@ -194,7 +209,7 @@ def create_template(xml_content: str) -> Template:
 def update_template(name: str, xml_content: str) -> Template:
     template = _parse_template_xml(xml_content)
     old_path = _find_template_file(name)
-    new_path = TEMPLATES_DIR / f"{template.name.lower().replace(' ', '_')}.xml"
+    new_path = _template_path(template.name)
     if old_path and old_path != new_path:
         old_path.unlink()
     new_path.write_text(xml_content, encoding="utf-8")

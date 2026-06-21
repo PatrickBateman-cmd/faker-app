@@ -33,27 +33,27 @@ def _generate_simple(db) -> str:
 
 def test_export_csv(db):
     ds_id = _generate_simple(db)
-    path = export_csv(ds_id)
+    path, name = export_csv(ds_id)
     assert os.path.exists(path)
-    assert path.endswith(".csv")
+    assert name.endswith(".csv")
     assert os.path.getsize(path) > 0
     os.unlink(path)
 
 
 def test_export_parquet(db):
     ds_id = _generate_simple(db)
-    path = export_parquet(ds_id)
+    path, name = export_parquet(ds_id)
     assert os.path.exists(path)
-    assert path.endswith(".parquet")
+    assert name.endswith(".parquet")
     assert os.path.getsize(path) > 0
     os.unlink(path)
 
 
 def test_export_xlsx(db):
     ds_id = _generate_simple(db)
-    path = export_xlsx(ds_id)
+    path, name = export_xlsx(ds_id)
     assert os.path.exists(path)
-    assert path.endswith(".xlsx")
+    assert name.endswith(".xlsx")
     assert os.path.getsize(path) > 0
     os.unlink(path)
 

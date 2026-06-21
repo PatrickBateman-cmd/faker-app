@@ -1,0 +1,38 @@
+<template name="Support Ticket" category="Operations">
+  <meta description="Customer support ticket with priority, status, and resolution tracking" version="1.0"/>
+  <field name="ticket_id" type="string" generator="bothify">
+    <constraint format="TKT-########"/>
+  </field>
+  <field name="customer_name" type="string" generator="name"/>
+  <field name="customer_email" type="string" generator="email"/>
+  <field name="subject" type="string" generator="catch_phrase"/>
+  <field name="category" type="string" generator="random_element">
+    <constraint values="Billing,Technical,Account,Shipping,Returns,General Inquiry,Bug Report,Feature Request,Security,Compliance"/>
+  </field>
+  <field name="priority" type="string" generator="random_element">
+    <constraint values="Critical,High,Medium,Low"/>
+  </field>
+  <field name="status" type="string" generator="random_element">
+    <constraint values="Open,In Progress,Waiting on Customer,Escalated,Resolved,Closed"/>
+  </field>
+  <field name="channel" type="string" generator="random_element">
+    <constraint values="Email,Chat,Phone,Portal,Social Media,In-App"/>
+  </field>
+  <field name="assigned_agent" type="string" generator="name"/>
+  <field name="team" type="string" generator="random_element">
+    <constraint values="Tier 1,Tier 2,Tier 3,Engineering,Billing,Compliance"/>
+  </field>
+  <field name="created_at" type="date" generator="date_between">
+    <constraint start="-1y" end="today"/>
+  </field>
+  <field name="resolved_at" type="date" generator="date_between">
+    <constraint start="-1y" end="today"/>
+  </field>
+  <field name="response_time_hours" type="integer" generator="random_int">
+    <constraint min="0" max="168"/>
+  </field>
+  <field name="satisfaction_score" type="integer" generator="random_int">
+    <constraint min="1" max="5"/>
+  </field>
+  <field name="is_escalated" type="boolean" generator="boolean"/>
+</template>

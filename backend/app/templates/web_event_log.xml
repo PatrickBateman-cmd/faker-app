@@ -1,0 +1,33 @@
+<template name="Web Event Log" category="Technology">
+  <meta description="Web application event log entry with user, session, and request details" version="1.0"/>
+  <field name="log_id" type="string" generator="uuid4" unique="true"/>
+  <field name="timestamp" type="date" generator="date_between">
+    <constraint start="-7d" end="today"/>
+  </field>
+  <field name="session_id" type="string" generator="uuid4"/>
+  <field name="user_id" type="string" generator="uuid4"/>
+  <field name="event_type" type="string" generator="random_element">
+    <constraint values="page_view,click,form_submit,login,logout,purchase,search,error,api_call,download"/>
+  </field>
+  <field name="url_path" type="string" generator="uri_path"/>
+  <field name="http_method" type="string" generator="random_element">
+    <constraint values="GET,POST,PUT,PATCH,DELETE"/>
+  </field>
+  <field name="http_status" type="integer" generator="random_element">
+    <constraint values="200,201,204,301,302,400,401,403,404,422,429,500,502,503"/>
+  </field>
+  <field name="response_time_ms" type="integer" generator="random_int">
+    <constraint min="1" max="5000"/>
+  </field>
+  <field name="ip_address" type="string" generator="ipv4"/>
+  <field name="user_agent" type="string" generator="user_agent"/>
+  <field name="country" type="string" generator="country"/>
+  <field name="city" type="string" generator="city"/>
+  <field name="device_type" type="string" generator="random_element">
+    <constraint values="Desktop,Mobile,Tablet,Bot,Smart TV"/>
+  </field>
+  <field name="browser" type="string" generator="random_element">
+    <constraint values="Chrome,Firefox,Safari,Edge,Opera,Samsung Internet"/>
+  </field>
+  <field name="is_authenticated" type="boolean" generator="boolean"/>
+</template>

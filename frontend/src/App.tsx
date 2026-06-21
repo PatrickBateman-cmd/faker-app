@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, useNavigate, useParams } from "react-rout
 import { Sidebar } from "./components/Layout/Sidebar";
 import { Dashboard } from "./components/Dashboard/Dashboard";
 import { FinancialPanel } from "./components/FinancialPanel/FinancialPanel";
+import { KagglePanel } from "./components/KagglePanel/KagglePanel";
 import { GenerationControls } from "./components/GenerationControls/GenerationControls";
 import { Iso20022Panel } from "./components/Iso20022Panel/Iso20022Panel";
 import { ResultsViewer } from "./components/ResultsViewer/ResultsViewer";
@@ -31,6 +32,7 @@ function AppRoutes() {
       templates: "/templates",
       iso20022: "/iso20022",
       financial: "/financial",
+      kaggle: "/kaggle",
       generation: "/generation",
       datasets: "/datasets",
     };
@@ -46,6 +48,7 @@ function AppRoutes() {
           <Route path="/templates" element={<TemplateLibrary onApply={handleApply} />} />
           <Route path="/iso20022" element={<Iso20022Panel onApply={handleApply} />} />
           <Route path="/financial" element={<FinancialPanel onNavigate={handleNavigate} />} />
+          <Route path="/kaggle" element={<KagglePanel onNavigate={handleNavigate} />} />
           <Route path="/generation" element={<GenerationControls onNavigate={handleNavigate} pendingTemplate={pendingTemplate} />} />
           <Route path="/datasets" element={<ResultsViewer />} />
           <Route path="/datasets/:id" element={<ResultsViewerWrapper />} />

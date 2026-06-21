@@ -6,6 +6,7 @@ const NAV_ITEMS = [
   { path: "/templates", label: "Templates", icon: "◇" },
   { path: "/iso20022", label: "ISO 20022", icon: "◎" },
   { path: "/financial", label: "Financial", icon: "▲" },
+  { path: "/kaggle", label: "Kaggle", icon: "⬡" },
   { path: "/generation", label: "Generation", icon: "◆" },
   { path: "/datasets", label: "Datasets", icon: "▣" },
 ];
