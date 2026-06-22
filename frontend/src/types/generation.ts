@@ -27,6 +27,8 @@ export interface GenerateRequest {
   datasets: DatasetDefinition[];
   homogeneity: number;
   seed?: number | null;
+  overlap_ratio?: number;
+  exact_fields?: string[];
 }
 
 export interface DatasetResult {
@@ -42,4 +44,6 @@ export interface GenerateResponse {
   homogeneity: number;
   seed: number | null;
   datasets: DatasetResult[];
+  overlap_pool_size: number;
+  exact_fields: string[];
 }

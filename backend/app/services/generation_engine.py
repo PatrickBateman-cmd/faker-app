@@ -175,12 +175,29 @@ def _generate_field_value(fake: Faker, field: FieldDefinition, constraint: Const
         return _apply_constraint(fake, fake.word(), cons)
 
 
+def _build_overlap_pool(
+    fake: Faker,
+    fields: list[FieldDefinition],
+    exact_field_names: set[str],
+    pool_size: int,
+) -> list[dict]:
+    exact_fields = [f for f in fields if f.name in exact_field_names]
+    pool = []
+    for _ in range(pool_size):
+        entry = {}
+        for field in exact_fields:
+            entry[field.name] = _generate_field_value(fake, field, None)
+        pool.append(entry)
+    return pool
+
+
 def _generate_dataset(
     fake: Faker,
     definition: DatasetDefinition,
     run_id: int,
     homogeneity: int,
     master_seed: int,
+    overlap_pool: list[dict] | None = None,
 ) -> DatasetResult:
     fields = definition.fields
     rows = definition.rows
@@ -235,13 +252,20 @@ def _generate_dataset(
     placeholders = ", ".join(["?"] * len(column_names))
     insert_sql = f'INSERT INTO "{table_name}" ({columns_formatted}) VALUES ({placeholders})'
 
+    pool = overlap_pool or []
+
     for batch_start in range(0, rows, batch_size):
         batch_end = min(batch_start + batch_size, rows)
         batch_data: list[list] = []
 
         for row_idx in range(batch_start, batch_end):
+            pool_entry = pool[row_idx] if row_idx < len(pool) else {}
             row: list = []
             for fi, field in enumerate(fields):
+                if field.name in pool_entry:
+                    row.append(pool_entry[field.name])
+                    continue
+
                 if field.null_probability and random.random() < field.null_probability:
                     row.append(None)
                     continue
@@ -485,9 +509,32 @@ def generate_datasets(request: GenerateRequest) -> GenerateResponse:
     main_fake.seed_instance(master_seed)
     random.seed(master_seed)
 
+    # Validate overlap config before touching DuckDB
+    overlap_ratio = request.overlap_ratio
+    exact_field_names = set(request.exact_fields)
+    if overlap_ratio > 0:
+        if not exact_field_names:
+            raise ValueError("exact_fields must be specified when overlap_ratio > 0")
+        for ds in request.datasets:
+            if ds.group_config:
+                raise ValueError("overlap is not supported with grouped datasets")
+            ds_field_names = {f.name for f in ds.fields}
+            for ef in exact_field_names:
+                if ef not in ds_field_names:
+                    raise ValueError(f"exact field '{ef}' not found in dataset '{ds.name}'")
+
     db = DuckDBManager.get_instance()
     result = db.execute("SELECT nextval('seq_run_id')").fetchone()
     run_id = result[0] if result else 1
+
+    # Build the global overlap pool once
+    overlap_pool: list[dict] = []
+    pool_size = 0
+    if overlap_ratio > 0 and request.datasets:
+        pool_size = int(min(d.rows for d in request.datasets) * overlap_ratio)
+        if pool_size > 0:
+            first_fields = request.datasets[0].fields
+            overlap_pool = _build_overlap_pool(main_fake, first_fields, exact_field_names, pool_size)
 
     dataset_results: list[DatasetResult] = []
     for dataset_def in request.datasets:
@@ -506,6 +553,7 @@ def generate_datasets(request: GenerateRequest) -> GenerateResponse:
                 run_id=run_id,
                 homogeneity=request.homogeneity,
                 master_seed=master_seed,
+                overlap_pool=overlap_pool,
             )
         dataset_results.append(dr)
 
@@ -514,4 +562,6 @@ def generate_datasets(request: GenerateRequest) -> GenerateResponse:
         homogeneity=request.homogeneity,
         seed=master_seed,
         datasets=dataset_results,
+        overlap_pool_size=pool_size,
+        exact_fields=list(exact_field_names),
     )

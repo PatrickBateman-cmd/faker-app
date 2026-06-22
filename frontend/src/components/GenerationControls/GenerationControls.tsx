@@ -85,8 +85,12 @@ export function GenerationControls({ onNavigate, pendingTemplate: externalTempla
   const [datasets, setDatasets] = useState<DatasetDefinition[]>([emptyDataset("Dataset 1")]);
   const [homogeneity, setHomogeneity] = useState(50);
   const [seed, setSeed] = useState("");
+  const [overlapRatio, setOverlapRatio] = useState(0);
+  const [exactFields, setExactFields] = useState("");
   const [mode, setMode] = useState<"flat" | "grouped">("flat");
   const [results, setResults] = useState<DatasetResult[] | null>(null);
+  const [overlapPoolSize, setOverlapPoolSize] = useState<number>(0);
+  const [resultExactFields, setResultExactFields] = useState<string[]>([]);
 
   const templates = useQuery({
     queryKey: ["templates"],
@@ -97,6 +101,8 @@ export function GenerationControls({ onNavigate, pendingTemplate: externalTempla
     mutationFn: generateDatasets,
     onSuccess: (data) => {
       setResults(data.datasets);
+      setOverlapPoolSize(data.overlap_pool_size);
+      setResultExactFields(data.exact_fields);
     },
   });
 
@@ -216,6 +222,10 @@ export function GenerationControls({ onNavigate, pendingTemplate: externalTempla
 
   function handleGenerate() {
     const seedVal = seed ? parseInt(seed, 10) : undefined;
+    const parsedExactFields = exactFields
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
     generateMut.mutate({
       datasets: datasets.map((d) => ({
         ...d,
@@ -223,6 +233,8 @@ export function GenerationControls({ onNavigate, pendingTemplate: externalTempla
       })),
       homogeneity,
       seed: seedVal && !isNaN(seedVal) ? seedVal : undefined,
+      overlap_ratio: overlapRatio / 100,
+      exact_fields: parsedExactFields,
     });
   }
 
@@ -271,6 +283,32 @@ export function GenerationControls({ onNavigate, pendingTemplate: externalTempla
             className="w-24 bg-[var(--surface)] border border-[var(--border)] rounded px-2 py-1 text-sm text-[var(--text)] placeholder:text-[var(--muted)] focus:outline-none focus:border-cyan-700"
           />
         </div>
+
+        <div className="flex items-center gap-2">
+          <label className="text-sm text-[var(--muted)]">Overlap:</label>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            value={overlapRatio}
+            onChange={(e) => setOverlapRatio(Number(e.target.value))}
+            className="w-28"
+          />
+          <span className="text-sm text-[var(--accent)] w-10">{overlapRatio}%</span>
+        </div>
+
+        {overlapRatio > 0 && (
+          <div className="flex items-center gap-2">
+            <label className="text-sm text-[var(--muted)]">Exact fields:</label>
+            <input
+              type="text"
+              value={exactFields}
+              onChange={(e) => setExactFields(e.target.value)}
+              placeholder="e.g. customer_id, email"
+              className="w-48 bg-[var(--surface)] border border-[var(--border)] rounded px-2 py-1 text-sm text-[var(--text)] placeholder:text-[var(--muted)] focus:outline-none focus:border-cyan-700"
+            />
+          </div>
+        )}
       </div>
 
       {/* Flat / Grouped toggle */}
@@ -600,10 +638,20 @@ export function GenerationControls({ onNavigate, pendingTemplate: externalTempla
       </div>
 
       {results && (
-        <GenerationResults
-          results={results}
-          onView={() => onNavigate?.("datasets")}
-        />
+        <>
+          {overlapPoolSize > 0 && (
+            <p className="text-xs text-[var(--muted)]">
+              Shared pool: <span className="text-[var(--accent)]">{overlapPoolSize} rows</span>
+              {resultExactFields.length > 0 && (
+                <> &bull; Exact fields: <span className="text-[var(--accent)]">{resultExactFields.join(", ")}</span></>
+              )}
+            </p>
+          )}
+          <GenerationResults
+            results={results}
+            onView={() => onNavigate?.("datasets")}
+          />
+        </>
       )}
     </div>
   );

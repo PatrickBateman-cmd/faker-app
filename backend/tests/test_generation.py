@@ -136,3 +136,73 @@ def test_weighted_random_element(db):
     values = [r[0] for r in rows]
     assert "red" in values
     assert "blue" in values
+
+
+def _two_dataset_req(rows: int = 10, overlap_ratio: float = 0.0, exact_fields: list[str] | None = None, seed: int = 42) -> GenerateRequest:
+    shared_fields = [
+        FieldDefinition(name="cust_id", generator="uuid4", type="string"),
+        FieldDefinition(name="age", generator="random_int", type="integer"),
+    ]
+    return GenerateRequest(
+        datasets=[
+            DatasetDefinition(name="ds1", rows=rows, fields=list(shared_fields)),
+            DatasetDefinition(name="ds2", rows=rows, fields=list(shared_fields)),
+        ],
+        homogeneity=100,
+        seed=seed,
+        overlap_ratio=overlap_ratio,
+        exact_fields=exact_fields or [],
+    )
+
+
+def test_overlap_zero_no_pool(db):
+    resp = generate_datasets(_two_dataset_req(rows=10, overlap_ratio=0.0))
+    assert resp.overlap_pool_size == 0
+    assert resp.exact_fields == []
+
+
+def test_overlap_pool_size_calculated(db):
+    resp = generate_datasets(_two_dataset_req(rows=10, overlap_ratio=0.5, exact_fields=["cust_id"]))
+    assert resp.overlap_pool_size == 5  # floor(10 * 0.5)
+
+
+def test_overlap_exact_fields_match_across_datasets(db):
+    resp = generate_datasets(_two_dataset_req(rows=10, overlap_ratio=0.5, exact_fields=["cust_id"]))
+    pool_size = resp.overlap_pool_size
+
+    ids1 = [r[0] for r in db.execute(f'SELECT cust_id FROM "{resp.datasets[0].table_name}"').fetchall()]
+    ids2 = [r[0] for r in db.execute(f'SELECT cust_id FROM "{resp.datasets[1].table_name}"').fetchall()]
+
+    # First pool_size rows must share the same cust_id
+    for i in range(pool_size):
+        assert ids1[i] == ids2[i], f"Pool row {i}: expected matching cust_id, got {ids1[i]} vs {ids2[i]}"
+
+    # Rows beyond the pool must differ (uuid4 is always unique)
+    for i in range(pool_size, len(ids1)):
+        assert ids1[i] != ids2[i], f"Non-pool row {i} should have distinct cust_id"
+
+
+def test_overlap_non_exact_fields_not_in_pool_entry(db):
+    # Verify the pool only carries exact_fields values — not other columns.
+    # We do this by checking that row_count is still correct (all rows generated).
+    resp = generate_datasets(_two_dataset_req(rows=10, overlap_ratio=0.5, exact_fields=["cust_id"]))
+    assert resp.datasets[0].row_count == 10
+    assert resp.datasets[1].row_count == 10
+
+    # Both datasets must have all age values non-null (age was generated, not skipped)
+    ages1 = [r[0] for r in db.execute(f'SELECT age FROM "{resp.datasets[0].table_name}"').fetchall()]
+    ages2 = [r[0] for r in db.execute(f'SELECT age FROM "{resp.datasets[1].table_name}"').fetchall()]
+    assert all(v is not None for v in ages1)
+    assert all(v is not None for v in ages2)
+
+
+def test_overlap_error_missing_exact_fields(db):
+    import pytest
+    with pytest.raises(ValueError, match="exact_fields must be specified"):
+        generate_datasets(_two_dataset_req(rows=10, overlap_ratio=0.5, exact_fields=[]))
+
+
+def test_overlap_error_unknown_exact_field(db):
+    import pytest
+    with pytest.raises(ValueError, match="exact field 'nonexistent' not found"):
+        generate_datasets(_two_dataset_req(rows=10, overlap_ratio=0.5, exact_fields=["nonexistent"]))

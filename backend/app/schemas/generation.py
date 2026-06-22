@@ -52,6 +52,8 @@ class GenerateRequest(BaseModel):
     )
     homogeneity: int = Field(default=50, ge=1, le=100)
     seed: int | None = None
+    overlap_ratio: float = Field(default=0.0, ge=0.0, le=1.0)
+    exact_fields: list[str] = Field(default_factory=list)
 
 
 class DatasetResult(BaseModel):
@@ -67,3 +69,5 @@ class GenerateResponse(BaseModel):
     homogeneity: int
     seed: int | None
     datasets: list[DatasetResult]
+    overlap_pool_size: int = 0
+    exact_fields: list[str] = Field(default_factory=list)
