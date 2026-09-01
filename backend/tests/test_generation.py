@@ -396,3 +396,55 @@ def test_generate_row_pool_entry_beats_null_probability():
     row = generate_row(fields, fakers, fake_fallback, pool_entry={"shared_val": 999})
 
     assert row[0] == 999
+
+
+def test_sql_eligible_field_in_flat_dataset(db):
+    req = GenerateRequest(
+        datasets=[
+            DatasetDefinition(
+                name="flat_sql",
+                rows=50,
+                fields=[
+                    FieldDefinition(name="id", generator="random_int", type="integer",
+                                     constraint=ConstraintConfig(min=1, max=1000000)),
+                    FieldDefinition(name="email", generator="email", type="string"),
+                    FieldDefinition(name="active", generator="boolean", type="boolean"),
+                ],
+            ),
+        ],
+        homogeneity=100,
+        seed=42,
+    )
+    resp = generate_datasets(req)
+    table = resp.datasets[0].table_name
+    rows = db.execute(f'SELECT id, email, active FROM "{table}"').fetchall()
+    assert len(rows) == 50
+    for row_id, email, active in rows:
+        assert isinstance(row_id, int) and 1 <= row_id <= 1000000
+        assert "@" in email
+        assert isinstance(active, bool)
+
+
+def test_sql_eligible_field_excluded_when_it_is_exact_field(db):
+    # id is random_int (SQL-eligible by generator), but it's an exact_field for an
+    # overlap request — it must still go through the Python/overlap-pool path.
+    req = GenerateRequest(
+        datasets=[
+            DatasetDefinition(name="a", rows=10, fields=[
+                FieldDefinition(name="id", generator="random_int", type="integer",
+                                 constraint=ConstraintConfig(min=1, max=1000000)),
+            ]),
+            DatasetDefinition(name="b", rows=10, fields=[
+                FieldDefinition(name="id", generator="random_int", type="integer",
+                                 constraint=ConstraintConfig(min=1, max=1000000)),
+            ]),
+        ],
+        homogeneity=100,
+        seed=1,
+        overlap_ratio=1.0,
+        exact_fields=["id"],
+    )
+    resp = generate_datasets(req)
+    ids_a = [r[0] for r in db.execute(f'SELECT id FROM "{resp.datasets[0].table_name}"').fetchall()]
+    ids_b = [r[0] for r in db.execute(f'SELECT id FROM "{resp.datasets[1].table_name}"').fetchall()]
+    assert ids_a == ids_b  # overlap pool still works — id never took the SQL path

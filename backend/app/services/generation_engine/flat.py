@@ -8,13 +8,14 @@ from faker import Faker
 from app.core.database import DuckDBManager
 from app.core.validation import validate_column_name, validate_table_name
 from app.schemas.generation import DatasetDefinition, DatasetResult
-from app.services.generation_engine.fakers import build_field_fakers
+from app.services.generation_engine.fakers import fakers_from_seeds, roll_field_seeds
 from app.services.generation_engine.persistence import (
     create_table,
     infer_duckdb_types,
     persist_dataset_metadata,
 )
 from app.services.generation_engine.row_builder import generate_row
+from app.services.generation_engine.sql_generators import build_sql_columns, is_sql_eligible
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,7 @@ def generate_dataset(
     homogeneity: int,
     master_seed: int,
     overlap_pool: list[dict] | None = None,
+    exact_field_names: set[str] | None = None,
 ) -> DatasetResult:
     fields = definition.fields
     rows = definition.rows
@@ -53,7 +55,16 @@ def generate_dataset(
             logger.exception("Failed to load shared_key pool")
             shared_key_pool = []
 
-    field_fakers = build_field_fakers(fields, homogeneity, master_seed)
+    exact_names = exact_field_names or set()
+    seeds = roll_field_seeds(fields, homogeneity, master_seed)
+    field_fakers = fakers_from_seeds(seeds)
+
+    sql_fields = [f for f in fields if is_sql_eligible(f, exact_names)]
+    if sql_fields:
+        field_seeds_by_name = {f.name: seeds[i] for i, f in enumerate(fields)}
+        sql_columns = build_sql_columns(db, sql_fields, rows, field_seeds_by_name)
+    else:
+        sql_columns = {}
 
     batch_size = 5000
     columns_formatted = ", ".join(f'"{c}"' for c in column_names)
@@ -68,11 +79,12 @@ def generate_dataset(
 
         for row_idx in range(batch_start, batch_end):
             pool_entry = pool[row_idx] if row_idx < len(pool) else {}
+            sql_entry = {name: values[row_idx] for name, values in sql_columns.items()}
             row = generate_row(
                 fields,
                 field_fakers,
                 fake,
-                pool_entry=pool_entry,
+                pool_entry={**sql_entry, **pool_entry},
                 shared_key_pool=shared_key_pool,
             )
             batch_data.append(row)
