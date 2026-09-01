@@ -3,8 +3,17 @@ from __future__ import annotations
 from app.core.database import DuckDBManager
 from app.schemas.generation import ReconBreakRecord
 
+DEFAULT_RECON_BREAKS_LIMIT = 1000
+MAX_RECON_BREAKS_LIMIT = 10000
 
-def get_recon_breaks(run_id: int) -> list[ReconBreakRecord]:
+
+def get_recon_breaks(
+    run_id: int,
+    limit: int = DEFAULT_RECON_BREAKS_LIMIT,
+    offset: int = 0,
+) -> list[ReconBreakRecord]:
+    limit = max(1, min(limit, MAX_RECON_BREAKS_LIMIT))
+    offset = max(0, offset)
     db = DuckDBManager.get_instance()
     rows = db.execute(
         """
@@ -13,8 +22,9 @@ def get_recon_breaks(run_id: int) -> list[ReconBreakRecord]:
         FROM metadata_recon_breaks
         WHERE run_id = ?
         ORDER BY id
+        LIMIT ? OFFSET ?
         """,
-        [run_id],
+        [run_id, limit, offset],
     ).fetchall()
     return [
         ReconBreakRecord(

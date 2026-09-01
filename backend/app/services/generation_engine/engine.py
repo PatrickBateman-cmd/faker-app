@@ -31,6 +31,8 @@ def generate_datasets(request: GenerateRequest) -> GenerateResponse:
             raise ValueError("reconciliation_mode requires at least 2 datasets")
         if not request.exact_fields:
             raise ValueError("reconciliation_mode requires exact_fields (join key first)")
+        if len({ds.rows for ds in request.datasets}) > 1:
+            raise ValueError("reconciliation_mode requires all datasets to declare the same number of rows")
         overlap_ratio = 1.0
         join_key_field = request.exact_fields[0]
         for fb in request.field_breaks:
@@ -122,6 +124,6 @@ def generate_datasets(request: GenerateRequest) -> GenerateResponse:
         seed=master_seed,
         datasets=dataset_results,
         overlap_pool_size=pool_size,
-        exact_fields=list(exact_field_names),
+        exact_fields=request.exact_fields,
         break_count=len(ground_truth),
     )

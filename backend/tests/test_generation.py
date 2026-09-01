@@ -832,3 +832,41 @@ def test_reconciliation_mode_forces_overlap_ratio_to_one(db):
     )
     resp = generate_datasets(req)
     assert resp.overlap_pool_size == 8
+
+
+def test_reconciliation_mode_requires_equal_row_counts(db):
+    import pytest
+
+    shared_fields = [FieldDefinition(name="trade_id", generator="uuid4", type="string")]
+    req = GenerateRequest(
+        datasets=[
+            DatasetDefinition(name="ds1", rows=8, fields=list(shared_fields)),
+            DatasetDefinition(name="ds2", rows=10, fields=list(shared_fields)),
+        ],
+        reconciliation_mode=True,
+        exact_fields=["trade_id"],
+    )
+    with pytest.raises(ValueError, match="same number of rows"):
+        generate_datasets(req)
+
+
+def test_reconciliation_mode_exact_fields_response_preserves_request_order(db):
+    shared_fields = [
+        FieldDefinition(name="trade_id", generator="uuid4", type="string"),
+        FieldDefinition(name="amount", generator="random_int", type="integer"),
+        FieldDefinition(name="status", generator="random_element", type="string"),
+        FieldDefinition(name="notes", generator="text", type="string"),
+    ]
+    ordered_exact_fields = ["notes", "status", "trade_id", "amount"]
+    req = GenerateRequest(
+        datasets=[
+            DatasetDefinition(name="ds1", rows=5, fields=list(shared_fields)),
+            DatasetDefinition(name="ds2", rows=5, fields=list(shared_fields)),
+        ],
+        reconciliation_mode=True,
+        exact_fields=ordered_exact_fields,
+    )
+    resp = generate_datasets(req)
+    # exact_fields[0] is the join key by contract; the response must echo the exact
+    # request order, not a Python set's arbitrary iteration order.
+    assert resp.exact_fields == ordered_exact_fields

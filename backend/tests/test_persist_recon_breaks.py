@@ -23,8 +23,24 @@ def test_persist_recon_breaks_writes_rows(db):
     ).fetchall()
     assert rows == [
         (7, "ds-1", "amount", "T1", "100.0", "105.0", "drift"),
-        (7, "ds-2", "status", "T2", "settled", "None", "null"),
+        (7, "ds-2", "status", "T2", "settled", None, "null"),
     ]
+
+
+def test_persist_recon_breaks_null_style_stores_sql_null_not_string(db):
+    breaks = [
+        BreakRecord(
+            dataset_id="ds-1", field_name="amount", join_key_value="T1",
+            true_value=100.0, broken_value=None, break_style="null",
+        ),
+    ]
+    persist_recon_breaks(db, run_id=9, breaks=breaks)
+
+    row = db.execute(
+        "SELECT broken_value, broken_value IS NULL FROM metadata_recon_breaks WHERE run_id = 9"
+    ).fetchone()
+    assert row[0] is None
+    assert row[1] is True
 
 
 def test_persist_recon_breaks_empty_list_is_noop(db):

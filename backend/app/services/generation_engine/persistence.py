@@ -71,6 +71,10 @@ def persist_dataset_metadata(
     )
 
 
+def _str_or_none(value: object) -> str | None:
+    return None if value is None else str(value)
+
+
 def persist_recon_breaks(db, run_id: int, breaks: list[BreakRecord]) -> None:
     if not breaks:
         return
@@ -79,9 +83,9 @@ def persist_recon_breaks(db, run_id: int, breaks: list[BreakRecord]) -> None:
             run_id,
             b.dataset_id,
             b.field_name,
-            str(b.join_key_value),
-            str(b.true_value),
-            str(b.broken_value),
+            _str_or_none(b.join_key_value),
+            _str_or_none(b.true_value),
+            _str_or_none(b.broken_value),
             b.break_style,
         ]
         for b in breaks
