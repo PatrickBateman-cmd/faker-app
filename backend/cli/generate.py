@@ -6,10 +6,12 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from app.schemas.generation import (
     ConstraintConfig,
     DatasetDefinition,
+    FieldBreakConfig,
     FieldDefinition,
     GenerateRequest,
     GroupConfig,
 )
+from app.services import generation_engine
 from app.services.generation_engine import generate_datasets
 
 from cli.common import console, get_state, output_result
@@ -25,7 +27,7 @@ app = typer.Typer(
 @app.callback(invoke_without_command=True)
 def generate(
     ctx: typer.Context,
-    name: str = typer.Option(..., "--name", "-n", help="Dataset name"),
+    name: str = typer.Option(None, "--name", "-n", help="Dataset name"),
     rows: int = typer.Option(100, "--rows", "-r", help="Number of rows", min=1, max=100000),
     template: str = typer.Option(None, "--template", "-t", help="Template name from library"),
     fields_json: str = typer.Option(None, "--fields-json", "-j", help="Inline JSON field definitions"),
@@ -41,10 +43,18 @@ def generate(
     child_fields_json: str = typer.Option(None, "--child-fields-json", help="Inline JSON child field definitions (for grouped mode)"),
     fmt: str = typer.Option("table", "--format", "-f", help="Output format"),
     db: str = typer.Option(None, "--db", "-d", help="DuckDB path override"),
+    reconciliation_mode: bool = typer.Option(False, "--reconciliation-mode", help="Lock this batch into reconciliation mode: full overlap + optional intentional breaks"),
+    exact_fields: str = typer.Option(None, "--exact-fields", help="Comma-separated field names shared across datasets; first is the join key"),
+    overlap_ratio: float = typer.Option(0.0, "--overlap-ratio", help="Fraction of rows drawn from the shared pool (0.0-1.0)", min=0.0, max=1.0),
+    field_breaks_json: str = typer.Option(None, "--field-breaks-json", help="Inline JSON list of field break configs (requires --reconciliation-mode)"),
 ) -> None:
     """Generate synthetic datasets from field definitions or a template."""
     if ctx.invoked_subcommand is not None:
         return
+
+    if name is None:
+        console.print("[red]Error:[/red] --name is required")
+        raise typer.Exit(code=1)
 
     state = get_state()
     state.ensure_db(db=db)
@@ -109,6 +119,15 @@ def generate(
 
     dataset_defs = [_parse_dataset_def(d) for d in defs_data]
 
+    if reconciliation_mode and overlap_ratio != 0.0:
+        console.print("[red]Error:[/red] --overlap-ratio cannot be combined with --reconciliation-mode (it is forced to 1.0 automatically)")
+        raise typer.Exit(code=1)
+
+    exact_fields_list = [s.strip() for s in exact_fields.split(",") if s.strip()] if exact_fields else []
+    field_breaks_list = (
+        [FieldBreakConfig(**fb) for fb in json.loads(field_breaks_json)] if field_breaks_json else []
+    )
+
     if groups is not None:
         pf = json.loads(parent_fields_json) if parent_fields_json else []
         cf = json.loads(child_fields_json) if child_fields_json else []
@@ -125,6 +144,10 @@ def generate(
         datasets=dataset_defs,
         homogeneity=homogeneity,
         seed=seed,
+        overlap_ratio=overlap_ratio,
+        exact_fields=exact_fields_list,
+        reconciliation_mode=reconciliation_mode,
+        field_breaks=field_breaks_list,
     )
 
     if not quiet:
@@ -206,3 +229,27 @@ def _constraint_to_dict(c) -> dict | None:
         "start": c.start,
         "end": c.end,
     }
+
+
+@app.command("breaks")
+def breaks_cmd(
+    run_id: int = typer.Argument(..., help="Run ID returned by `faker generate`"),
+    fmt: str = typer.Option("table", "--format", "-f", help="Output format"),
+    db: str = typer.Option(None, "--db", "-d", help="DuckDB path override"),
+) -> None:
+    """Show the reconciliation ground truth (intentional breaks) for a run."""
+    state = get_state()
+    state.ensure_db(db=db)
+
+    records = generation_engine.get_recon_breaks(run_id)
+    rows_out = [
+        [str(r.id), r.dataset_id, r.field_name, str(r.join_key_value), str(r.true_value), str(r.broken_value), r.break_style]
+        for r in records
+    ]
+    output_result(
+        f"Reconciliation breaks for run {run_id} ({len(records)})",
+        ["ID", "Dataset", "Field", "Join Key", "True Value", "Broken Value", "Style"],
+        rows_out,
+        fmt,
+        json_data=[r.model_dump() for r in records],
+    )

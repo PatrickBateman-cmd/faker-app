@@ -57,7 +57,7 @@ backend/app/
   config.py        – Settings via pydantic-settings; reads .env at repo root (Path(__file__).parent.parent.parent / ".env")
   core/
     database.py    – Thread-safe DuckDB singleton (DuckDBManager.get_instance()); RLock on execute + transaction()
-    migrations.py  – Versioned SQL migrations; auto-run on startup; currently 6 migrations
+    migrations.py  – Versioned SQL migrations; auto-run on startup; currently 7 migrations
     validation.py  – validate_column_name() / validate_table_name() — must use before any SQL interpolation
   routers/         – Thin HTTP layer; one APIRouter per domain
   schemas/         – Pydantic request/response models
@@ -71,15 +71,15 @@ Layering: **routers → services → DuckDBManager**. Never call DuckDBManager d
 
 ### DuckDB conventions
 - Every dataset gets a table named `dataset_{uuid4}`. Always double-quote in SQL: `"dataset_..."`.
-- Metadata tables: `metadata_datasets`, `metadata_templates`, `metadata_runs`, `metadata_aggregations`, `metadata_iso_cache`.
-- Two sequences: `seq_run_id` (runs) and `seq_aggregation_id` (aggregations/dedup). **Do not mix them** — aggregation INSERTs must use `nextval('seq_aggregation_id')` explicitly.
+- Metadata tables: `metadata_datasets`, `metadata_templates`, `metadata_runs`, `metadata_aggregations`, `metadata_iso_cache`, `metadata_recon_breaks`.
+- Three sequences: `seq_run_id` (runs), `seq_aggregation_id` (aggregations/dedup), and `seq_recon_break_id` (reconciliation ground-truth breaks). **Do not mix them** — aggregation INSERTs must use `nextval('seq_aggregation_id')` explicitly, and recon-break INSERTs must use `nextval('seq_recon_break_id')` explicitly.
 - Dataset tables are **immutable snapshots** — never updated after creation. Aggregation/dedup always creates a new table.
 - Schema changes go through `migrations.py` — add a `Migration` entry with a monotonically increasing key. Each migration runs inside `BEGIN`/`COMMIT`/`ROLLBACK`; partial failures roll back atomically.
 - All migrations use `IF NOT EXISTS` (idempotent), and the applied-marker is written inside the same transaction.
 - Use `read_csv_auto(?, normalize_names=true, ignore_errors=true)` for CSV ingestion (Kaggle import). Use parameterized `LIMIT ?` — never interpolate `LIMIT {n}`.
 - Batch inserts use `db.executemany(sql, batch)` — never row-by-row `execute()` in a loop.
 - `zip(columns, row, strict=True)` in dataset_service.py — will error loudly on schema mismatch.
-- Deleting a dataset also cascades to `metadata_aggregations` (via `delete_dataset` in dataset_service.py).
+- Deleting a dataset also cascades to `metadata_aggregations` and `metadata_recon_breaks` (via `delete_dataset` in dataset_service.py).
 
 ### DuckDBManager.transaction()
 For multi-statement atomic blocks, use `db.transaction()` which holds the `RLock` for the entire block and wraps in `BEGIN`/`COMMIT`/`ROLLBACK`. Calling `db.execute()` inside is safe because `RLock` is reentrant:
@@ -185,6 +185,7 @@ Routing: react-router-dom `<Routes>` + `<Route>`. 7 pages: `/`, `/templates`, `/
 | Method | Endpoint | Description |
 |---|---|---|
 | `POST` | `/generate` | Generate 1–4 datasets |
+| `GET` | `/generate/runs/{run_id}/breaks?limit=1000&offset=0` | Paginated reconciliation ground-truth breaks for a run |
 | `GET` | `/datasets` | List datasets |
 | `GET` | `/datasets/{id}/rows?page=1&per_page=100` | Paginated rows |
 | `GET` | `/datasets/{id}/columns` | Column names |

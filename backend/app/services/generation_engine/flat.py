@@ -7,7 +7,8 @@ from faker import Faker
 
 from app.core.database import DuckDBManager
 from app.core.validation import validate_column_name, validate_table_name
-from app.schemas.generation import DatasetDefinition, DatasetResult
+from app.schemas.generation import DatasetDefinition, DatasetResult, FieldBreakConfig
+from app.services.generation_engine.breaks import BreakRecord, apply_field_breaks
 from app.services.generation_engine.fakers import fakers_from_seeds, roll_field_seeds
 from app.services.generation_engine.persistence import (
     create_table,
@@ -28,6 +29,9 @@ def generate_dataset(
     master_seed: int,
     overlap_pool: list[dict] | None = None,
     exact_field_names: set[str] | None = None,
+    join_key_field: str | None = None,
+    field_breaks: dict[str, FieldBreakConfig] | None = None,
+    ground_truth: list[BreakRecord] | None = None,
 ) -> DatasetResult:
     fields = definition.fields
     rows = definition.rows
@@ -36,6 +40,7 @@ def generate_dataset(
     validate_table_name(table_name)
 
     column_names = [validate_column_name(f.name) for f in fields]
+    join_key_col_idx = column_names.index(join_key_field) if join_key_field else None
     col_types = infer_duckdb_types(fields)
 
     db = DuckDBManager.get_instance()
@@ -87,6 +92,12 @@ def generate_dataset(
                 pool_entry={**sql_entry, **pool_entry},
                 shared_key_pool=shared_key_pool,
             )
+            if field_breaks and join_key_col_idx is not None:
+                row_breaks = apply_field_breaks(
+                    row, fields, field_breaks, row[join_key_col_idx], dataset_id, fake
+                )
+                if ground_truth is not None:
+                    ground_truth.extend(row_breaks)
             batch_data.append(row)
 
         db.executemany(insert_sql, batch_data)

@@ -4,6 +4,7 @@ import json
 import logging
 
 from app.schemas.generation import DatasetDefinition, DatasetResult, FieldDefinition
+from app.services.generation_engine.breaks import BreakRecord
 
 logger = logging.getLogger(__name__)
 
@@ -67,4 +68,33 @@ def persist_dataset_metadata(
         table_name=table_name,
         row_count=actual_count,
         columns=column_names,
+    )
+
+
+def _str_or_none(value: object) -> str | None:
+    return None if value is None else str(value)
+
+
+def persist_recon_breaks(db, run_id: int, breaks: list[BreakRecord]) -> None:
+    if not breaks:
+        return
+    rows = [
+        [
+            run_id,
+            b.dataset_id,
+            b.field_name,
+            _str_or_none(b.join_key_value),
+            _str_or_none(b.true_value),
+            _str_or_none(b.broken_value),
+            b.break_style,
+        ]
+        for b in breaks
+    ]
+    db.executemany(
+        """
+        INSERT INTO metadata_recon_breaks
+            (run_id, dataset_id, field_name, join_key_value, true_value, broken_value, break_style)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        rows,
     )

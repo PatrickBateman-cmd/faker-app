@@ -9,9 +9,16 @@ import { CollapsibleSection } from "../CollapsibleSection/CollapsibleSection";
 import type {
   DatasetDefinition,
   DatasetResult,
+  FieldBreakConfig,
   FieldDef,
   TemplateSummary,
 } from "../../types/generation";
+
+const BREAK_STYLE_OPTIONS: FieldBreakConfig["break_style"][] = ["drift", "different", "null"];
+
+function emptyFieldBreak(fieldName: string): FieldBreakConfig {
+  return { field_name: fieldName, break_rate: 10, break_style: "drift", drift_pct: 2 };
+}
 
 const GENERATOR_OPTIONS = [
   "first_name", "last_name", "name", "email", "phone_number",
@@ -88,10 +95,13 @@ export function GenerationControls({ onNavigate, pendingTemplate: externalTempla
   const [seed, setSeed] = useState("");
   const [overlapRatio, setOverlapRatio] = useState(0);
   const [exactFields, setExactFields] = useState("");
+  const [reconciliationMode, setReconciliationMode] = useState(false);
+  const [fieldBreaks, setFieldBreaks] = useState<FieldBreakConfig[]>([]);
   const [mode, setMode] = useState<"flat" | "grouped">("flat");
   const [results, setResults] = useState<DatasetResult[] | null>(null);
   const [overlapPoolSize, setOverlapPoolSize] = useState<number>(0);
   const [resultExactFields, setResultExactFields] = useState<string[]>([]);
+  const [resultBreakCount, setResultBreakCount] = useState<number>(0);
   const [collapsedDatasets, setCollapsedDatasets] = useState<Set<number>>(new Set());
 
   const templates = useQuery({
@@ -105,6 +115,7 @@ export function GenerationControls({ onNavigate, pendingTemplate: externalTempla
       setResults(data.datasets);
       setOverlapPoolSize(data.overlap_pool_size);
       setResultExactFields(data.exact_fields);
+      setResultBreakCount(data.break_count ?? 0);
     },
   });
 
@@ -236,6 +247,34 @@ export function GenerationControls({ onNavigate, pendingTemplate: externalTempla
     }
   }, [externalTemplate]);
 
+  function toggleReconciliationMode(checked: boolean) {
+    setReconciliationMode(checked);
+    if (checked) {
+      setOverlapRatio(100);
+    } else {
+      setFieldBreaks([]);
+    }
+    setResults(null);
+  }
+
+  function addFieldBreak() {
+    const joinKey = exactFields.split(",").map((s) => s.trim()).filter(Boolean)[0];
+    const candidate = exactFields
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .find((f) => f !== joinKey && !fieldBreaks.some((fb) => fb.field_name === f));
+    setFieldBreaks((prev) => [...prev, emptyFieldBreak(candidate ?? "")]);
+  }
+
+  function updateFieldBreak(index: number, updater: (fb: FieldBreakConfig) => FieldBreakConfig) {
+    setFieldBreaks((prev) => prev.map((fb, i) => (i === index ? updater(fb) : fb)));
+  }
+
+  function removeFieldBreak(index: number) {
+    setFieldBreaks((prev) => prev.filter((_, i) => i !== index));
+  }
+
   function handleGenerate() {
     const seedVal = seed ? parseInt(seed, 10) : undefined;
     const parsedExactFields = exactFields
@@ -251,6 +290,18 @@ export function GenerationControls({ onNavigate, pendingTemplate: externalTempla
       seed: seedVal && !isNaN(seedVal) ? seedVal : undefined,
       overlap_ratio: overlapRatio / 100,
       exact_fields: parsedExactFields,
+      ...(reconciliationMode
+        ? {
+            reconciliation_mode: true,
+            field_breaks: fieldBreaks
+              .filter((fb) => fb.field_name)
+              .map((fb) => ({
+                ...fb,
+                break_rate: fb.break_rate / 100,
+                drift_pct: fb.drift_pct / 100,
+              })),
+          }
+        : {}),
     });
   }
 
@@ -301,26 +352,39 @@ export function GenerationControls({ onNavigate, pendingTemplate: externalTempla
         </div>
 
         <div className="flex items-center gap-2">
-          <label className="text-sm text-[var(--muted)]">Overlap:</label>
+          <label className={`text-sm ${reconciliationMode ? "text-[var(--muted)]/50" : "text-[var(--muted)]"}`}>Overlap:</label>
           <input
             type="range"
             min={0}
             max={100}
             value={overlapRatio}
+            disabled={reconciliationMode}
             onChange={(e) => setOverlapRatio(Number(e.target.value))}
-            className="w-28"
+            className="w-28 disabled:opacity-50"
           />
           <span className="text-sm text-[var(--accent)] w-10">{overlapRatio}%</span>
         </div>
 
-        {overlapRatio > 0 && (
+        <label className="flex items-center gap-2 text-sm text-[var(--text)] cursor-pointer">
+          <input
+            type="checkbox"
+            checked={reconciliationMode}
+            onChange={(e) => toggleReconciliationMode(e.target.checked)}
+            className="accent-[var(--accent)]"
+          />
+          Reconciliation Mode
+        </label>
+
+        {(overlapRatio > 0 || reconciliationMode) && (
           <div className="flex items-center gap-2">
-            <label className="text-sm text-[var(--muted)]">Exact fields:</label>
+            <label className="text-sm text-[var(--muted)]">
+              {reconciliationMode ? "Exact fields (first = join key):" : "Exact fields:"}
+            </label>
             <input
               type="text"
               value={exactFields}
               onChange={(e) => setExactFields(e.target.value)}
-              placeholder="e.g. customer_id, email"
+              placeholder="e.g. trade_id, amount"
               className="w-48 bg-[var(--surface)] border border-[var(--border)] rounded px-2 py-1 text-sm text-[var(--text)] placeholder:text-[var(--muted)] focus:outline-none focus:border-cyan-700"
             />
             {mode === "grouped" && (
@@ -331,6 +395,80 @@ export function GenerationControls({ onNavigate, pendingTemplate: externalTempla
           </div>
         )}
       </div>
+
+      {reconciliationMode && (
+        <div className="flex flex-col gap-2 bg-[var(--surface)] border border-[var(--border)] rounded p-3">
+          <p className="text-xs font-semibold text-[var(--accent)] uppercase tracking-wider">Field Breaks</p>
+          {fieldBreaks.length === 0 && (
+            <p className="text-xs text-[var(--muted)]">No break rules — datasets will match exactly on the fields above.</p>
+          )}
+          {fieldBreaks.map((fb, i) => (
+            <div key={i} className="flex items-center gap-2 text-xs">
+              <select
+                value={fb.field_name}
+                onChange={(e) => updateFieldBreak(i, (f) => ({ ...f, field_name: e.target.value }))}
+                className="w-32 bg-[var(--elevated)] border border-[var(--border)] rounded px-1.5 py-1 text-[var(--text)]"
+              >
+                <option value="" disabled>field…</option>
+                {exactFields
+                  .split(",")
+                  .map((s) => s.trim())
+                  .filter(Boolean)
+                  .slice(1)
+                  .map((f) => (
+                    <option key={f} value={f}>{f}</option>
+                  ))}
+              </select>
+              <label className="text-[var(--muted)]">Rate:</label>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={fb.break_rate}
+                onChange={(e) => updateFieldBreak(i, (f) => ({ ...f, break_rate: Number(e.target.value) }))}
+                className="w-20"
+              />
+              <span className="text-[var(--accent)] w-9">{fb.break_rate}%</span>
+              <select
+                value={fb.break_style}
+                onChange={(e) => updateFieldBreak(i, (f) => ({ ...f, break_style: e.target.value as FieldBreakConfig["break_style"] }))}
+                className="bg-[var(--elevated)] border border-[var(--border)] rounded px-1.5 py-1 text-[var(--text)]"
+              >
+                {BREAK_STYLE_OPTIONS.map((s) => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+              {fb.break_style === "drift" && (
+                <>
+                  <label className="text-[var(--muted)]">Drift:</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={fb.drift_pct}
+                    onChange={(e) => updateFieldBreak(i, (f) => ({ ...f, drift_pct: Math.max(1, Number(e.target.value) || 1) }))}
+                    className="w-14 bg-[var(--elevated)] border border-[var(--border)] rounded px-1.5 py-1 text-[var(--text)]"
+                  />
+                  <span className="text-[var(--muted)]">%</span>
+                </>
+              )}
+              <button
+                onClick={() => removeFieldBreak(i)}
+                className="text-[var(--muted)] hover:text-[var(--red)] px-1"
+                title="Remove break rule"
+              >
+                x
+              </button>
+            </div>
+          ))}
+          <button
+            onClick={addFieldBreak}
+            className="self-start text-xs text-[var(--muted)] hover:text-[var(--text)]"
+          >
+            + Add break rule
+          </button>
+        </div>
+      )}
 
       {/* Flat / Grouped toggle */}
       <div className="flex items-center gap-4">
@@ -680,6 +818,9 @@ export function GenerationControls({ onNavigate, pendingTemplate: externalTempla
               Shared pool: <span className="text-[var(--accent)]">{overlapPoolSize} rows</span>
               {resultExactFields.length > 0 && (
                 <> &bull; Exact fields: <span className="text-[var(--accent)]">{resultExactFields.join(", ")}</span></>
+              )}
+              {resultBreakCount > 0 && (
+                <> &bull; Breaks: <span className="text-[var(--accent)]">{resultBreakCount}</span></>
               )}
             </p>
           )}
