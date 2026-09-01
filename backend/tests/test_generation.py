@@ -714,3 +714,121 @@ def test_grouped_field_breaks_applied_to_child_field(db):
         assert abs(broken_v - true_v) <= true_v * 0.1 + 1
 
     assert resp.break_count == 10
+
+
+def test_reconciliation_mode_requires_two_datasets(db):
+    import pytest
+    from app.schemas.generation import FieldBreakConfig
+
+    req = GenerateRequest(
+        datasets=[DatasetDefinition(name="ds1", rows=5, fields=[FieldDefinition(name="trade_id", generator="uuid4", type="string")])],
+        reconciliation_mode=True,
+        exact_fields=["trade_id"],
+    )
+    with pytest.raises(ValueError, match="at least 2 datasets"):
+        generate_datasets(req)
+
+
+def test_reconciliation_mode_requires_exact_fields(db):
+    import pytest
+
+    req = GenerateRequest(
+        datasets=[
+            DatasetDefinition(name="ds1", rows=5, fields=[FieldDefinition(name="trade_id", generator="uuid4", type="string")]),
+            DatasetDefinition(name="ds2", rows=5, fields=[FieldDefinition(name="trade_id", generator="uuid4", type="string")]),
+        ],
+        reconciliation_mode=True,
+    )
+    with pytest.raises(ValueError, match="requires exact_fields"):
+        generate_datasets(req)
+
+
+def test_field_breaks_without_reconciliation_mode_rejected(db):
+    import pytest
+    from app.schemas.generation import FieldBreakConfig
+
+    shared_fields = [FieldDefinition(name="trade_id", generator="uuid4", type="string")]
+    req = GenerateRequest(
+        datasets=[
+            DatasetDefinition(name="ds1", rows=5, fields=list(shared_fields)),
+            DatasetDefinition(name="ds2", rows=5, fields=list(shared_fields)),
+        ],
+        field_breaks=[FieldBreakConfig(field_name="trade_id", break_rate=0.1)],
+    )
+    with pytest.raises(ValueError, match="requires reconciliation_mode"):
+        generate_datasets(req)
+
+
+def test_field_break_on_join_key_rejected(db):
+    import pytest
+    from app.schemas.generation import FieldBreakConfig
+
+    shared_fields = [FieldDefinition(name="trade_id", generator="uuid4", type="string")]
+    req = GenerateRequest(
+        datasets=[
+            DatasetDefinition(name="ds1", rows=5, fields=list(shared_fields)),
+            DatasetDefinition(name="ds2", rows=5, fields=list(shared_fields)),
+        ],
+        reconciliation_mode=True,
+        exact_fields=["trade_id"],
+        field_breaks=[FieldBreakConfig(field_name="trade_id", break_rate=0.1)],
+    )
+    with pytest.raises(ValueError, match="cannot target the join key"):
+        generate_datasets(req)
+
+
+def test_field_break_not_in_exact_fields_rejected(db):
+    import pytest
+    from app.schemas.generation import FieldBreakConfig
+
+    shared_fields = [
+        FieldDefinition(name="trade_id", generator="uuid4", type="string"),
+        FieldDefinition(name="notes", generator="text", type="string"),
+    ]
+    req = GenerateRequest(
+        datasets=[
+            DatasetDefinition(name="ds1", rows=5, fields=list(shared_fields)),
+            DatasetDefinition(name="ds2", rows=5, fields=list(shared_fields)),
+        ],
+        reconciliation_mode=True,
+        exact_fields=["trade_id"],
+        field_breaks=[FieldBreakConfig(field_name="notes", break_rate=0.1)],
+    )
+    with pytest.raises(ValueError, match="must be listed in exact_fields"):
+        generate_datasets(req)
+
+
+def test_field_break_drift_on_non_numeric_field_rejected(db):
+    import pytest
+    from app.schemas.generation import FieldBreakConfig
+
+    shared_fields = [
+        FieldDefinition(name="trade_id", generator="uuid4", type="string"),
+        FieldDefinition(name="status", generator="random_element", type="string"),
+    ]
+    req = GenerateRequest(
+        datasets=[
+            DatasetDefinition(name="ds1", rows=5, fields=list(shared_fields)),
+            DatasetDefinition(name="ds2", rows=5, fields=list(shared_fields)),
+        ],
+        reconciliation_mode=True,
+        exact_fields=["trade_id", "status"],
+        field_breaks=[FieldBreakConfig(field_name="status", break_rate=0.1, break_style="drift")],
+    )
+    with pytest.raises(ValueError, match="not numeric"):
+        generate_datasets(req)
+
+
+def test_reconciliation_mode_forces_overlap_ratio_to_one(db):
+    shared_fields = [FieldDefinition(name="trade_id", generator="uuid4", type="string")]
+    req = GenerateRequest(
+        datasets=[
+            DatasetDefinition(name="ds1", rows=8, fields=list(shared_fields)),
+            DatasetDefinition(name="ds2", rows=8, fields=list(shared_fields)),
+        ],
+        reconciliation_mode=True,
+        exact_fields=["trade_id"],
+        overlap_ratio=0.0,  # deliberately not 1.0 — must be forced
+    )
+    resp = generate_datasets(req)
+    assert resp.overlap_pool_size == 8
