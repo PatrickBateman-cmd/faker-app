@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import random
+from unittest.mock import patch
+
+from faker import Faker
+
 from app.core.database import DuckDBManager
 from app.schemas.generation import (
     ConstraintConfig,
@@ -9,6 +14,8 @@ from app.schemas.generation import (
     GroupConfig,
 )
 from app.services.generation_engine import generate_datasets
+from app.services.generation_engine.fakers import build_field_fakers
+from app.services.generation_engine.row_builder import generate_row
 
 
 def _make_simple_req(rows: int = 10, seed: int | None = None, homogeneity: int = 100):
@@ -296,3 +303,96 @@ def test_overlap_pool_built_from_first_grouped_dataset(db):
 
     for i in range(pool_size):
         assert ids_grouped[i] == ids_flat[i]
+
+
+# --- build_field_fakers invariants -----------------------------------------
+
+
+def test_build_field_fakers_special_generators_always_none():
+    """shared_key/formula/uuid4/uuid_int must never get a Faker instance,
+    regardless of homogeneity — they're handled outside the faker path
+    entirely in generate_row.
+    """
+    fields = [
+        FieldDefinition(name="sk", generator="shared_key", type="string"),
+        FieldDefinition(name="f", generator="formula", type="string", formula="{{x}}"),
+        FieldDefinition(name="u4", generator="uuid4", type="string"),
+        FieldDefinition(name="ui", generator="uuid_int", type="integer"),
+        FieldDefinition(name="age", generator="random_int", type="integer"),
+    ]
+    fakers = build_field_fakers(fields, homogeneity=100, master_seed=1)
+    assert fakers[0] is None
+    assert fakers[1] is None
+    assert fakers[2] is None
+    assert fakers[3] is None
+    # homogeneity=100 guarantees every non-special field gets a master-seeded Faker.
+    assert fakers[4] is not None
+    assert isinstance(fakers[4], Faker)
+
+
+def test_build_field_fakers_random_draw_count():
+    """Each non-special field consumes exactly one random.randint() roll to
+    decide master-seed vs. per-row randomization; special-generator fields
+    must be skipped BEFORE that roll, not draw-and-discard.
+    """
+    fields = [
+        FieldDefinition(name=f"ri{i}", generator="random_int", type="integer")
+        for i in range(5)
+    ] + [
+        FieldDefinition(name=f"u{i}", generator="uuid4", type="string")
+        for i in range(2)
+    ]
+    with patch(
+        "app.services.generation_engine.fakers.random.randint",
+        wraps=random.randint,
+    ) as mock_randint:
+        build_field_fakers(fields, homogeneity=50, master_seed=1)
+    assert mock_randint.call_count == 5
+
+
+# --- generate_row branch precedence -----------------------------------------
+
+
+def test_generate_row_null_probability_beats_condition():
+    """null_probability must be checked before condition — a field that is
+    forced null must stay null even when its condition would otherwise pass.
+    """
+    fields = [
+        FieldDefinition(name="age", generator="random_int", type="integer"),
+        FieldDefinition(
+            name="status",
+            generator="random_int",
+            type="integer",
+            null_probability=1.0,
+            condition="age >= 18",
+        ),
+    ]
+    fakers: list[Faker | None] = [None, None]
+    fake_fallback = Faker()
+    fake_fallback.seed_instance(1)
+
+    row = generate_row(fields, fakers, fake_fallback)
+
+    assert row[0] is not None
+    assert row[1] is None
+
+
+def test_generate_row_pool_entry_beats_null_probability():
+    """pool_entry must override every other branch — including a field with
+    null_probability=1.0, which would otherwise always be forced to None.
+    """
+    fields = [
+        FieldDefinition(
+            name="shared_val",
+            generator="random_int",
+            type="integer",
+            null_probability=1.0,
+        ),
+    ]
+    fakers: list[Faker | None] = [None]
+    fake_fallback = Faker()
+    fake_fallback.seed_instance(1)
+
+    row = generate_row(fields, fakers, fake_fallback, pool_entry={"shared_val": 999})
+
+    assert row[0] == 999

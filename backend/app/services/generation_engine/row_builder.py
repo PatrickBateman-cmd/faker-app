@@ -18,10 +18,9 @@ def generate_row(
     fakers: list[Faker | None],
     fake_fallback: Faker,
     pool_entry: dict | None = None,
-    row_prefix: list | None = None,
     shared_key_pool: list | None = None,
 ) -> list:
-    row = list(row_prefix) if row_prefix else []
+    row = []
     pool_entry = pool_entry or {}
     for fi, field in enumerate(fields):
         if field.name in pool_entry:
