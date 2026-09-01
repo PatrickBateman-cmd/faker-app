@@ -257,13 +257,23 @@ export function GenerationControls({ onNavigate, pendingTemplate: externalTempla
     setResults(null);
   }
 
+  // Fields actually eligible for exact_fields/field_breaks on a dataset: for grouped
+  // datasets the backend only supports child-level fields (parent fields repeat once
+  // per group, so per-row pool injection doesn't apply to them); for flat datasets
+  // any field qualifies.
+  function eligibleFieldNames(ds: DatasetDefinition | undefined): string[] {
+    if (!ds) return [];
+    const source = ds.group_config ? ds.group_config.child_fields : ds.fields;
+    return source.map((f) => f.name).filter(Boolean);
+  }
+
   function addFieldBreak() {
     const joinKey = exactFields.split(",").map((s) => s.trim()).filter(Boolean)[0];
-    const candidate = exactFields
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean)
+    const candidate = eligibleFieldNames(datasets[0])
       .find((f) => f !== joinKey && !fieldBreaks.some((fb) => fb.field_name === f));
+    if (candidate && !exactFields.split(",").map((s) => s.trim()).includes(candidate)) {
+      setExactFields((prev) => (prev.trim() ? `${prev}, ${candidate}` : candidate));
+    }
     setFieldBreaks((prev) => [...prev, emptyFieldBreak(candidate ?? "")]);
   }
 
@@ -396,25 +406,51 @@ export function GenerationControls({ onNavigate, pendingTemplate: externalTempla
         )}
       </div>
 
+      {mode === "grouped" && (overlapRatio > 0 || reconciliationMode) && (() => {
+        const parentNames = new Set(
+          (datasets[0]?.group_config?.parent_fields ?? []).map((f) => f.name)
+        );
+        const invalid = exactFields
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .filter((f) => parentNames.has(f));
+        return invalid.length > 0 ? (
+          <p className="text-xs text-[var(--red)]">
+            {invalid.map((f) => `"${f}"`).join(", ")} {invalid.length === 1 ? "is a parent field" : "are parent fields"} — move{" "}
+            {invalid.length === 1 ? "it" : "them"} to Child Fields to use for exact fields / breaks.
+          </p>
+        ) : null;
+      })()}
+
       {reconciliationMode && (
         <div className="flex flex-col gap-2 bg-[var(--surface)] border border-[var(--border)] rounded p-3">
           <p className="text-xs font-semibold text-[var(--accent)] uppercase tracking-wider">Field Breaks</p>
-          {fieldBreaks.length === 0 && (
+          {eligibleFieldNames(datasets[0]).length === 0 ? (
+            <p className="text-xs text-[var(--red)]">
+              {mode === "grouped"
+                ? "No child fields yet — move at least one field from Parent Fields to Child Fields to add a break rule."
+                : "Add at least one field to the first dataset to add a break rule."}
+            </p>
+          ) : fieldBreaks.length === 0 ? (
             <p className="text-xs text-[var(--muted)]">No break rules — datasets will match exactly on the fields above.</p>
-          )}
+          ) : null}
           {fieldBreaks.map((fb, i) => (
             <div key={i} className="flex items-center gap-2 text-xs">
               <select
                 value={fb.field_name}
-                onChange={(e) => updateFieldBreak(i, (f) => ({ ...f, field_name: e.target.value }))}
+                onChange={(e) => {
+                  const name = e.target.value;
+                  updateFieldBreak(i, (f) => ({ ...f, field_name: name }));
+                  if (name && !exactFields.split(",").map((s) => s.trim()).includes(name)) {
+                    setExactFields((prev) => (prev.trim() ? `${prev}, ${name}` : name));
+                  }
+                }}
                 className="w-32 bg-[var(--elevated)] border border-[var(--border)] rounded px-1.5 py-1 text-[var(--text)]"
               >
                 <option value="" disabled>field…</option>
-                {exactFields
-                  .split(",")
-                  .map((s) => s.trim())
-                  .filter(Boolean)
-                  .slice(1)
+                {eligibleFieldNames(datasets[0])
+                  .filter((f) => f !== exactFields.split(",").map((s) => s.trim()).filter(Boolean)[0])
                   .map((f) => (
                     <option key={f} value={f}>{f}</option>
                   ))}
@@ -463,7 +499,8 @@ export function GenerationControls({ onNavigate, pendingTemplate: externalTempla
           ))}
           <button
             onClick={addFieldBreak}
-            className="self-start text-xs text-[var(--muted)] hover:text-[var(--text)]"
+            disabled={eligibleFieldNames(datasets[0]).length === 0}
+            className="self-start text-xs text-[var(--muted)] hover:text-[var(--text)] disabled:opacity-40 disabled:cursor-not-allowed"
           >
             + Add break rule
           </button>
