@@ -23,12 +23,21 @@ export interface SharedKeyConfig {
   source_field: string;
 }
 
+export interface FieldBreakConfig {
+  field_name: string;
+  break_rate: number;
+  break_style: "drift" | "different" | "null";
+  drift_pct: number;
+}
+
 export interface GenerateRequest {
   datasets: DatasetDefinition[];
   homogeneity: number;
   seed?: number | null;
   overlap_ratio?: number;
   exact_fields?: string[];
+  reconciliation_mode?: boolean;
+  field_breaks?: FieldBreakConfig[];
 }
 
 export interface DatasetResult {
@@ -46,4 +55,5 @@ export interface GenerateResponse {
   datasets: DatasetResult[];
   overlap_pool_size: number;
   exact_fields: string[];
+  break_count?: number;
 }
