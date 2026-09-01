@@ -670,3 +670,47 @@ def test_flat_field_breaks_zero_rate_no_ground_truth(db):
     amounts_1 = [r[0] for r in db.execute(f'SELECT amount FROM "{resp.datasets[1].table_name}"').fetchall()]
     assert amounts_0 == amounts_1
     assert resp.break_count == 0
+
+
+def test_grouped_field_breaks_applied_to_child_field(db):
+    from app.schemas.generation import FieldBreakConfig
+
+    def _grouped_def(name: str) -> DatasetDefinition:
+        return DatasetDefinition(
+            name=name,
+            rows=10,
+            group_config=GroupConfig(
+                num_groups=2,
+                split_pct=100,
+                parent_fields=[FieldDefinition(name="trade_id", generator="uuid4", type="string")],
+                child_fields=[
+                    FieldDefinition(name="counterparty_id", generator="uuid4", type="string"),
+                    FieldDefinition(
+                        name="qty", generator="random_int", type="integer",
+                        constraint=ConstraintConfig(min=1000, max=9999),
+                    ),
+                ],
+            ),
+        )
+
+    req = GenerateRequest(
+        datasets=[_grouped_def("g1"), _grouped_def("g2")],
+        homogeneity=100,
+        seed=42,
+        overlap_ratio=1.0,
+        exact_fields=["counterparty_id", "qty"],
+        reconciliation_mode=True,
+        field_breaks=[FieldBreakConfig(field_name="qty", break_rate=1.0, break_style="drift", drift_pct=0.1)],
+    )
+    resp = generate_datasets(req)
+
+    cp_0 = [r[0] for r in db.execute(f'SELECT counterparty_id FROM "{resp.datasets[0].table_name}"').fetchall()]
+    cp_1 = [r[0] for r in db.execute(f'SELECT counterparty_id FROM "{resp.datasets[1].table_name}"').fetchall()]
+    assert cp_0 == cp_1  # join key never breaks
+
+    qty_0 = [r[0] for r in db.execute(f'SELECT qty FROM "{resp.datasets[0].table_name}"').fetchall()]
+    qty_1 = [r[0] for r in db.execute(f'SELECT qty FROM "{resp.datasets[1].table_name}"').fetchall()]
+    for true_v, broken_v in zip(qty_0, qty_1, strict=True):
+        assert abs(broken_v - true_v) <= true_v * 0.1 + 1
+
+    assert resp.break_count == 10

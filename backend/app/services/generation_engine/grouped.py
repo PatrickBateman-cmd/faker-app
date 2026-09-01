@@ -7,7 +7,8 @@ from faker import Faker
 
 from app.core.database import DuckDBManager
 from app.core.validation import validate_column_name, validate_table_name
-from app.schemas.generation import DatasetDefinition, DatasetResult
+from app.schemas.generation import DatasetDefinition, DatasetResult, FieldBreakConfig
+from app.services.generation_engine.breaks import BreakRecord, apply_field_breaks
 from app.services.generation_engine.fakers import fakers_from_seeds, roll_field_seeds
 from app.services.generation_engine.persistence import (
     create_table,
@@ -26,6 +27,9 @@ def generate_grouped_dataset(
     master_seed: int,
     overlap_pool: list[dict] | None = None,
     exact_field_names: set[str] | None = None,
+    join_key_field: str | None = None,
+    field_breaks: dict[str, FieldBreakConfig] | None = None,
+    ground_truth: list[BreakRecord] | None = None,
 ) -> DatasetResult:
     group_cfg = definition.group_config
     assert group_cfg is not None
@@ -58,6 +62,13 @@ def generate_grouped_dataset(
     parent_fakers = fakers_from_seeds(parent_seeds)
     child_seeds = roll_field_seeds(child_fields, homogeneity, master_seed, namespace="child_")
     child_fakers = fakers_from_seeds(child_seeds)
+
+    child_field_names = [f.name for f in child_fields]
+    join_key_col_idx = (
+        child_field_names.index(join_key_field)
+        if join_key_field and join_key_field in child_field_names
+        else None
+    )
 
     # Distribute grouped_rows randomly across num_groups.
     # This must be computed before sql_child_columns is sized, since over-generation
@@ -119,6 +130,12 @@ def generate_grouped_dataset(
                 child_row = generate_row(
                     child_fields, child_fakers, fake, pool_entry={**sql_entry, **pool_entry}
                 )
+                if field_breaks and join_key_col_idx is not None:
+                    row_breaks = apply_field_breaks(
+                        child_row, child_fields, field_breaks, child_row[join_key_col_idx], dataset_id, fake
+                    )
+                    if ground_truth is not None:
+                        ground_truth.extend(row_breaks)
                 batch_data.append(parent_row + child_row + [parent_id])
 
                 if len(batch_data) >= batch_size:
@@ -134,6 +151,12 @@ def generate_grouped_dataset(
         child_row = generate_row(
             child_fields, child_fakers, fake, pool_entry={**sql_entry, **pool_entry}
         )
+        if field_breaks and join_key_col_idx is not None:
+            row_breaks = apply_field_breaks(
+                child_row, child_fields, field_breaks, child_row[join_key_col_idx], dataset_id, fake
+            )
+            if ground_truth is not None:
+                ground_truth.extend(row_breaks)
         batch_data.append(parent_row + child_row + [None])
 
         if len(batch_data) >= batch_size:
