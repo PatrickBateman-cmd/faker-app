@@ -448,3 +448,89 @@ def test_sql_eligible_field_excluded_when_it_is_exact_field(db):
     ids_a = [r[0] for r in db.execute(f'SELECT id FROM "{resp.datasets[0].table_name}"').fetchall()]
     ids_b = [r[0] for r in db.execute(f'SELECT id FROM "{resp.datasets[1].table_name}"').fetchall()]
     assert ids_a == ids_b  # overlap pool still works — id never took the SQL path
+
+
+def test_sql_eligible_fields_in_grouped_dataset(db):
+    req = GenerateRequest(
+        datasets=[
+            DatasetDefinition(
+                name="grouped_sql",
+                rows=30,
+                group_config=GroupConfig(
+                    num_groups=3,
+                    split_pct=100,
+                    parent_fields=[
+                        FieldDefinition(name="trade_id", generator="uuid4", type="string"),
+                        FieldDefinition(name="group_num", generator="random_int", type="integer",
+                                         constraint=ConstraintConfig(min=1, max=100)),
+                    ],
+                    child_fields=[
+                        FieldDefinition(name="qty", generator="random_int", type="integer",
+                                         constraint=ConstraintConfig(min=1, max=1000)),
+                        FieldDefinition(name="counterparty", generator="company", type="string"),
+                    ],
+                ),
+            ),
+        ],
+        homogeneity=100,
+        seed=7,
+    )
+    resp = generate_datasets(req)
+    table = resp.datasets[0].table_name
+    rows = db.execute(
+        f'SELECT trade_id, group_num, qty, counterparty, parent_id FROM "{table}"'
+    ).fetchall()
+    assert len(rows) == 30
+    for trade_id, group_num, qty, counterparty, parent_id in rows:
+        assert 1 <= group_num <= 100
+        assert 1 <= qty <= 1000
+        assert counterparty  # non-empty Faker company name, unaffected by this migration
+        assert parent_id is not None
+
+    # Each distinct trade_id (an SQL-generated PARENT field) must map to exactly one
+    # parent_id — proving the parent-row-per-group counting is correct, not reused
+    # across groups or regenerated per child row.
+    groups_seen: dict[str, set] = {}
+    for trade_id, _, _, _, parent_id in rows:
+        groups_seen.setdefault(trade_id, set()).add(parent_id)
+    assert all(len(pids) == 1 for pids in groups_seen.values())
+    assert len(groups_seen) == 3  # exactly 3 distinct parent trade_ids for 3 groups
+
+
+def test_sql_eligible_fields_in_grouped_dataset_with_flat_rows(db):
+    # split_pct < 100 means some rows are "flat" (ungrouped, parent_id=None), each
+    # generating its own one-off parent row — this exercises the flat_rows branch
+    # of the parent_call_count logic, not just the grouped branch.
+    req = GenerateRequest(
+        datasets=[
+            DatasetDefinition(
+                name="grouped_sql_partial",
+                rows=20,
+                group_config=GroupConfig(
+                    num_groups=2,
+                    split_pct=50,
+                    parent_fields=[
+                        FieldDefinition(name="group_num", generator="random_int", type="integer",
+                                         constraint=ConstraintConfig(min=1, max=100)),
+                    ],
+                    child_fields=[
+                        FieldDefinition(name="qty", generator="random_int", type="integer",
+                                         constraint=ConstraintConfig(min=1, max=1000)),
+                    ],
+                ),
+            ),
+        ],
+        homogeneity=100,
+        seed=9,
+    )
+    resp = generate_datasets(req)
+    table = resp.datasets[0].table_name
+    rows = db.execute(f'SELECT group_num, qty, parent_id FROM "{table}"').fetchall()
+    assert len(rows) == 20
+    flat_rows = [r for r in rows if r[2] is None]
+    grouped_rows = [r for r in rows if r[2] is not None]
+    assert len(flat_rows) == 10  # 50% of 20
+    assert len(grouped_rows) == 10
+    for group_num, qty, _ in rows:
+        assert 1 <= group_num <= 100
+        assert 1 <= qty <= 1000

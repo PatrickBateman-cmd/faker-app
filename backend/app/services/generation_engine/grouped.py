@@ -8,13 +8,14 @@ from faker import Faker
 from app.core.database import DuckDBManager
 from app.core.validation import validate_column_name, validate_table_name
 from app.schemas.generation import DatasetDefinition, DatasetResult
-from app.services.generation_engine.fakers import build_field_fakers
+from app.services.generation_engine.fakers import fakers_from_seeds, roll_field_seeds
 from app.services.generation_engine.persistence import (
     create_table,
     infer_duckdb_types,
     persist_dataset_metadata,
 )
 from app.services.generation_engine.row_builder import generate_row
+from app.services.generation_engine.sql_generators import build_sql_columns, is_sql_eligible
 
 
 def generate_grouped_dataset(
@@ -24,6 +25,7 @@ def generate_grouped_dataset(
     homogeneity: int,
     master_seed: int,
     overlap_pool: list[dict] | None = None,
+    exact_field_names: set[str] | None = None,
 ) -> DatasetResult:
     group_cfg = definition.group_config
     assert group_cfg is not None
@@ -36,6 +38,7 @@ def generate_grouped_dataset(
 
     grouped_rows = int(total_rows * split_pct / 100)
     flat_rows = total_rows - grouped_rows
+    grouped_enabled = num_groups > 0 and grouped_rows > 0
 
     dataset_id = str(uuid.uuid4())
     table_name = f"dataset_{dataset_id}"
@@ -49,8 +52,27 @@ def generate_grouped_dataset(
     db = DuckDBManager.get_instance()
     create_table(db, table_name, column_names, col_types)
 
-    parent_fakers = build_field_fakers(parent_fields, homogeneity, master_seed, namespace="parent_")
-    child_fakers = build_field_fakers(child_fields, homogeneity, master_seed, namespace="child_")
+    exact_names = exact_field_names or set()
+
+    parent_seeds = roll_field_seeds(parent_fields, homogeneity, master_seed, namespace="parent_")
+    parent_fakers = fakers_from_seeds(parent_seeds)
+    child_seeds = roll_field_seeds(child_fields, homogeneity, master_seed, namespace="child_")
+    child_fakers = fakers_from_seeds(child_seeds)
+
+    parent_call_count = (num_groups if grouped_enabled else 0) + flat_rows
+    sql_parent_fields = [f for f in parent_fields if is_sql_eligible(f, exact_names)]
+    if sql_parent_fields:
+        parent_seeds_by_name = {f.name: parent_seeds[i] for i, f in enumerate(parent_fields)}
+        sql_parent_columns = build_sql_columns(db, sql_parent_fields, parent_call_count, parent_seeds_by_name)
+    else:
+        sql_parent_columns = {}
+
+    sql_child_fields = [f for f in child_fields if is_sql_eligible(f, exact_names)]
+    if sql_child_fields:
+        child_seeds_by_name = {f.name: child_seeds[i] for i, f in enumerate(child_fields)}
+        sql_child_columns = build_sql_columns(db, sql_child_fields, total_rows, child_seeds_by_name)
+    else:
+        sql_child_columns = {}
 
     batch_size = 5000
     columns_formatted = ", ".join(f'"{c}"' for c in column_names)
@@ -60,9 +82,17 @@ def generate_grouped_dataset(
     batch_data: list[list] = []
     pool = overlap_pool or []
     row_idx = 0
+    parent_call_idx = 0
+
+    def _next_parent_row() -> list:
+        nonlocal parent_call_idx
+        sql_entry = {name: values[parent_call_idx] for name, values in sql_parent_columns.items()}
+        parent_row = generate_row(parent_fields, parent_fakers, fake, pool_entry=sql_entry)
+        parent_call_idx += 1
+        return parent_row
 
     # Distribute grouped_rows randomly across num_groups
-    if num_groups > 0 and grouped_rows > 0:
+    if grouped_enabled:
         raw_weights = [random.random() for _ in range(num_groups)]
         total_weight = sum(raw_weights)
         group_sizes = [max(1, int(grouped_rows * w / total_weight)) for w in raw_weights]
@@ -73,13 +103,16 @@ def generate_grouped_dataset(
 
         for g_idx in range(num_groups):
             parent_id = str(uuid.uuid4())
-            parent_row = generate_row(parent_fields, parent_fakers, fake)
+            parent_row = _next_parent_row()
 
             child_count = group_sizes[g_idx]
             for _ in range(child_count):
                 pool_entry = pool[row_idx] if row_idx < len(pool) else {}
+                sql_entry = {name: values[row_idx] for name, values in sql_child_columns.items()}
                 row_idx += 1
-                child_row = generate_row(child_fields, child_fakers, fake, pool_entry=pool_entry)
+                child_row = generate_row(
+                    child_fields, child_fakers, fake, pool_entry={**sql_entry, **pool_entry}
+                )
                 batch_data.append(parent_row + child_row + [parent_id])
 
                 if len(batch_data) >= batch_size:
@@ -88,10 +121,13 @@ def generate_grouped_dataset(
 
     # Flat rows
     for _ in range(flat_rows):
-        parent_row = generate_row(parent_fields, parent_fakers, fake)
+        parent_row = _next_parent_row()
         pool_entry = pool[row_idx] if row_idx < len(pool) else {}
+        sql_entry = {name: values[row_idx] for name, values in sql_child_columns.items()}
         row_idx += 1
-        child_row = generate_row(child_fields, child_fakers, fake, pool_entry=pool_entry)
+        child_row = generate_row(
+            child_fields, child_fakers, fake, pool_entry={**sql_entry, **pool_entry}
+        )
         batch_data.append(parent_row + child_row + [None])
 
         if len(batch_data) >= batch_size:
