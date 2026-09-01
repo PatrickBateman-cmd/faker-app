@@ -14,3 +14,8 @@ async def generate(body: GenerateRequest):
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Generation failed: {e!s}") from e
+
+
+@router.get("/runs/{run_id}/breaks")
+async def get_breaks(run_id: int):
+    return generation_engine.get_recon_breaks(run_id)
