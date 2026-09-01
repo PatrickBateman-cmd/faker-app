@@ -6,6 +6,7 @@ from app.schemas.generation import (
     DatasetDefinition,
     FieldDefinition,
     GenerateRequest,
+    GroupConfig,
 )
 from app.services.generation_engine import generate_datasets
 
@@ -206,3 +207,92 @@ def test_overlap_error_unknown_exact_field(db):
     import pytest
     with pytest.raises(ValueError, match="exact field 'nonexistent' not found"):
         generate_datasets(_two_dataset_req(rows=10, overlap_ratio=0.5, exact_fields=["nonexistent"]))
+
+
+def _grouped_dataset_def(name: str, rows: int = 10, num_groups: int = 2, split_pct: float = 100) -> DatasetDefinition:
+    return DatasetDefinition(
+        name=name,
+        rows=rows,
+        group_config=GroupConfig(
+            num_groups=num_groups,
+            split_pct=split_pct,
+            parent_fields=[
+                FieldDefinition(name="trade_id", generator="uuid4", type="string"),
+            ],
+            child_fields=[
+                FieldDefinition(name="counterparty_id", generator="uuid4", type="string"),
+                FieldDefinition(name="qty", generator="random_int", type="integer"),
+            ],
+        ),
+    )
+
+
+def test_overlap_grouped_child_field_matches_across_datasets(db):
+    req = GenerateRequest(
+        datasets=[
+            _grouped_dataset_def("g1", rows=10),
+            _grouped_dataset_def("g2", rows=10),
+        ],
+        homogeneity=100,
+        seed=42,
+        overlap_ratio=0.5,
+        exact_fields=["counterparty_id"],
+    )
+    resp = generate_datasets(req)
+    pool_size = resp.overlap_pool_size
+    assert pool_size == 5
+
+    ids1 = [r[0] for r in db.execute(f'SELECT counterparty_id FROM "{resp.datasets[0].table_name}"').fetchall()]
+    ids2 = [r[0] for r in db.execute(f'SELECT counterparty_id FROM "{resp.datasets[1].table_name}"').fetchall()]
+
+    for i in range(pool_size):
+        assert ids1[i] == ids2[i], f"Pool row {i}: expected matching counterparty_id, got {ids1[i]} vs {ids2[i]}"
+    for i in range(pool_size, len(ids1)):
+        assert ids1[i] != ids2[i], f"Non-pool row {i} should have distinct counterparty_id"
+
+
+def test_overlap_grouped_parent_field_rejected(db):
+    import pytest
+    req = GenerateRequest(
+        datasets=[
+            _grouped_dataset_def("g1", rows=10),
+            _grouped_dataset_def("g2", rows=10),
+        ],
+        homogeneity=100,
+        seed=42,
+        overlap_ratio=0.5,
+        exact_fields=["trade_id"],
+    )
+    with pytest.raises(ValueError, match="parent field"):
+        generate_datasets(req)
+
+
+def test_overlap_pool_built_from_first_grouped_dataset(db):
+    # Regression check: pool construction must not assume datasets[0].fields
+    # is populated — a grouped dataset first in the list has empty `fields`.
+    flat_def = DatasetDefinition(
+        name="flat_ds",
+        rows=10,
+        fields=[
+            FieldDefinition(name="counterparty_id", generator="uuid4", type="string"),
+        ],
+    )
+    req = GenerateRequest(
+        datasets=[
+            _grouped_dataset_def("g1", rows=10),
+            flat_def,
+        ],
+        homogeneity=100,
+        seed=42,
+        overlap_ratio=0.5,
+        exact_fields=["counterparty_id"],
+    )
+    resp = generate_datasets(req)
+    pool_size = resp.overlap_pool_size
+    assert pool_size == 5
+
+    ids_grouped = [r[0] for r in db.execute(f'SELECT counterparty_id FROM "{resp.datasets[0].table_name}"').fetchall()]
+    ids_flat = [r[0] for r in db.execute(f'SELECT counterparty_id FROM "{resp.datasets[1].table_name}"').fetchall()]
+
+    for i in range(pool_size):
+        assert ids_grouped[i] == ids_flat[i]

@@ -10,7 +10,7 @@ def list_datasets() -> list[dict]:
     db = DuckDBManager.get_instance()
     rows = db.execute(
         """
-        SELECT dataset_id, name, table_name, row_count, columns_json, homogeneity, seed, created_at
+        SELECT dataset_id, name, table_name, row_count, columns_json, homogeneity, seed, created_at, run_id
         FROM metadata_datasets
         ORDER BY created_at DESC
         """
@@ -25,6 +25,7 @@ def list_datasets() -> list[dict]:
             "homogeneity": r[5],
             "seed": r[6],
             "created_at": str(r[7]) if r[7] else None,
+            "run_id": r[8],
         }
         for r in rows
     ]
@@ -34,7 +35,7 @@ def get_dataset(dataset_id: str) -> dict | None:
     db = DuckDBManager.get_instance()
     row = db.execute(
         """
-        SELECT dataset_id, name, table_name, row_count, columns_json, homogeneity, seed, created_at
+        SELECT dataset_id, name, table_name, row_count, columns_json, homogeneity, seed, created_at, run_id
         FROM metadata_datasets
         WHERE dataset_id = ?
         """,
@@ -51,6 +52,7 @@ def get_dataset(dataset_id: str) -> dict | None:
         "homogeneity": row[5],
         "seed": row[6],
         "created_at": str(row[7]) if row[7] else None,
+        "run_id": row[8],
     }
 
 

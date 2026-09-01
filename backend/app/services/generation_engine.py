@@ -175,6 +175,12 @@ def _generate_field_value(fake: Faker, field: FieldDefinition, constraint: Const
         return _apply_constraint(fake, fake.word(), cons)
 
 
+def _effective_fields(ds: DatasetDefinition) -> list[FieldDefinition]:
+    if ds.group_config:
+        return ds.group_config.parent_fields + ds.group_config.child_fields
+    return ds.fields
+
+
 def _build_overlap_pool(
     fake: Faker,
     fields: list[FieldDefinition],
@@ -352,6 +358,7 @@ def _generate_grouped_dataset(
     run_id: int,
     homogeneity: int,
     master_seed: int,
+    overlap_pool: list[dict] | None = None,
 ) -> DatasetResult:
     group_cfg = definition.group_config
     assert group_cfg is not None
@@ -410,9 +417,13 @@ def _generate_grouped_dataset(
             else:
                 child_fakers.append(None)
 
-    def _gen_row(fields: list, fakers: list, row_prefix: list | None = None) -> list:
+    def _gen_row(fields: list, fakers: list, row_prefix: list | None = None, pool_entry: dict | None = None) -> list:
         row = list(row_prefix) if row_prefix else []
+        pool_entry = pool_entry or {}
         for fi, field in enumerate(fields):
+            if field.name in pool_entry:
+                row.append(pool_entry[field.name])
+                continue
             if field.null_probability and random.random() < field.null_probability:
                 row.append(None)
                 continue
@@ -438,6 +449,8 @@ def _generate_grouped_dataset(
     insert_sql = f'INSERT INTO "{table_name}" ({columns_formatted}) VALUES ({placeholders})'
 
     batch_data: list[list] = []
+    pool = overlap_pool or []
+    row_idx = 0
 
     # Distribute grouped_rows randomly across num_groups
     if num_groups > 0 and grouped_rows > 0:
@@ -455,7 +468,9 @@ def _generate_grouped_dataset(
 
             child_count = group_sizes[g_idx]
             for _ in range(child_count):
-                child_row = _gen_row(child_fields, child_fakers)
+                pool_entry = pool[row_idx] if row_idx < len(pool) else {}
+                row_idx += 1
+                child_row = _gen_row(child_fields, child_fakers, pool_entry=pool_entry)
                 batch_data.append(parent_row + child_row + [parent_id])
 
                 if len(batch_data) >= batch_size:
@@ -465,7 +480,9 @@ def _generate_grouped_dataset(
     # Flat rows
     for _ in range(flat_rows):
         parent_row = _gen_row(parent_fields, parent_fakers)
-        child_row = _gen_row(child_fields, child_fakers)
+        pool_entry = pool[row_idx] if row_idx < len(pool) else {}
+        row_idx += 1
+        child_row = _gen_row(child_fields, child_fakers, pool_entry=pool_entry)
         batch_data.append(parent_row + child_row + [None])
 
         if len(batch_data) >= batch_size:
@@ -517,8 +534,14 @@ def generate_datasets(request: GenerateRequest) -> GenerateResponse:
             raise ValueError("exact_fields must be specified when overlap_ratio > 0")
         for ds in request.datasets:
             if ds.group_config:
-                raise ValueError("overlap is not supported with grouped datasets")
-            ds_field_names = {f.name for f in ds.fields}
+                parent_names = {f.name for f in ds.group_config.parent_fields}
+                for ef in exact_field_names:
+                    if ef in parent_names:
+                        raise ValueError(
+                            f"exact field '{ef}' is a parent field in grouped dataset '{ds.name}'; "
+                            "overlap only supports child-level fields for grouped datasets"
+                        )
+            ds_field_names = {f.name for f in _effective_fields(ds)}
             for ef in exact_field_names:
                 if ef not in ds_field_names:
                     raise ValueError(f"exact field '{ef}' not found in dataset '{ds.name}'")
@@ -533,7 +556,7 @@ def generate_datasets(request: GenerateRequest) -> GenerateResponse:
     if overlap_ratio > 0 and request.datasets:
         pool_size = int(min(d.rows for d in request.datasets) * overlap_ratio)
         if pool_size > 0:
-            first_fields = request.datasets[0].fields
+            first_fields = _effective_fields(request.datasets[0])
             overlap_pool = _build_overlap_pool(main_fake, first_fields, exact_field_names, pool_size)
 
     dataset_results: list[DatasetResult] = []
@@ -545,6 +568,7 @@ def generate_datasets(request: GenerateRequest) -> GenerateResponse:
                 run_id=run_id,
                 homogeneity=request.homogeneity,
                 master_seed=master_seed,
+                overlap_pool=overlap_pool,
             )
         else:
             dr = _generate_dataset(

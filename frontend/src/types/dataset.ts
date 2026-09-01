@@ -7,6 +7,7 @@ export interface DatasetMeta {
   homogeneity: number;
   seed: number | null;
   created_at: string | null;
+  run_id: number;
 }
 
 export interface DatasetRowResponse {
