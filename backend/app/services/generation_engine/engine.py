@@ -26,46 +26,7 @@ from app.schemas.generation import (
     GroupConfig,
 )
 from app.services.generation_engine.generators import apply_constraint, generate_field_value
-
-
-def _check_condition(condition: str, row: list, fields: list) -> bool:
-    if not condition:
-        return True
-    m = re.match(r'^\s*(\w+)\s*(>=|<=|!=|==|>|<)\s*(.+)\s*$', condition)
-    if not m:
-        return True
-    field_name, op, raw_val = m.group(1), m.group(2), m.group(3).strip()
-
-    field_indices = {f.name: i for i, f in enumerate(fields)}
-    if field_name not in field_indices:
-        return True
-
-    field_val = row[field_indices[field_name]]
-    if field_val is None:
-        return False
-
-    try:
-        val = int(raw_val) if raw_val.isdigit() else (float(raw_val) if '.' in raw_val else raw_val.strip('"').strip("'"))
-    except ValueError:
-        val = raw_val.strip('"').strip("'")
-
-    try:
-        if op == ">=":
-            return field_val >= val
-        elif op == "<=":
-            return field_val <= val
-        elif op == ">":
-            return field_val > val
-        elif op == "<":
-            return field_val < val
-        elif op == "==":
-            return field_val == val
-        elif op == "!=":
-            return field_val != val
-        return True
-    except TypeError:
-        logger.warning("Type mismatch in condition '%s': %s vs %s", condition, type(field_val).__name__, type(val).__name__)
-        return False
+from app.services.generation_engine.conditions import check_condition
 
 
 
@@ -172,7 +133,7 @@ def _generate_dataset(
                     continue
 
                 if field.condition:
-                    if not _check_condition(field.condition, row, fields):
+                    if not check_condition(field.condition, row, fields):
                         row.append(None)
                         continue
 
@@ -323,7 +284,7 @@ def _generate_grouped_dataset(
                 row.append(None)
                 continue
             if field.condition:
-                if not _check_condition(field.condition, row, fields):
+                if not check_condition(field.condition, row, fields):
                     row.append(None)
                     continue
             if field.generator == "formula":
