@@ -396,3 +396,212 @@ def test_generate_row_pool_entry_beats_null_probability():
     row = generate_row(fields, fakers, fake_fallback, pool_entry={"shared_val": 999})
 
     assert row[0] == 999
+
+
+def test_sql_eligible_field_in_flat_dataset(db):
+    req = GenerateRequest(
+        datasets=[
+            DatasetDefinition(
+                name="flat_sql",
+                rows=50,
+                fields=[
+                    FieldDefinition(name="id", generator="random_int", type="integer",
+                                     constraint=ConstraintConfig(min=1, max=1000000)),
+                    FieldDefinition(name="email", generator="email", type="string"),
+                    FieldDefinition(name="active", generator="boolean", type="boolean"),
+                ],
+            ),
+        ],
+        homogeneity=100,
+        seed=42,
+    )
+    resp = generate_datasets(req)
+    table = resp.datasets[0].table_name
+    rows = db.execute(f'SELECT id, email, active FROM "{table}"').fetchall()
+    assert len(rows) == 50
+    for row_id, email, active in rows:
+        assert isinstance(row_id, int) and 1 <= row_id <= 1000000
+        assert "@" in email
+        assert isinstance(active, bool)
+
+
+def test_sql_eligible_field_excluded_when_it_is_exact_field(db):
+    # id is random_int (SQL-eligible by generator), but it's an exact_field for an
+    # overlap request — it must still go through the Python/overlap-pool path.
+    req = GenerateRequest(
+        datasets=[
+            DatasetDefinition(name="a", rows=10, fields=[
+                FieldDefinition(name="id", generator="random_int", type="integer",
+                                 constraint=ConstraintConfig(min=1, max=1000000)),
+            ]),
+            DatasetDefinition(name="b", rows=10, fields=[
+                FieldDefinition(name="id", generator="random_int", type="integer",
+                                 constraint=ConstraintConfig(min=1, max=1000000)),
+            ]),
+        ],
+        homogeneity=100,
+        seed=1,
+        overlap_ratio=1.0,
+        exact_fields=["id"],
+    )
+    resp = generate_datasets(req)
+    ids_a = [r[0] for r in db.execute(f'SELECT id FROM "{resp.datasets[0].table_name}"').fetchall()]
+    ids_b = [r[0] for r in db.execute(f'SELECT id FROM "{resp.datasets[1].table_name}"').fetchall()]
+    assert ids_a == ids_b  # overlap pool still works — id never took the SQL path
+
+
+def test_sql_eligible_fields_in_grouped_dataset(db):
+    req = GenerateRequest(
+        datasets=[
+            DatasetDefinition(
+                name="grouped_sql",
+                rows=30,
+                group_config=GroupConfig(
+                    num_groups=3,
+                    split_pct=100,
+                    parent_fields=[
+                        FieldDefinition(name="trade_id", generator="uuid4", type="string"),
+                        FieldDefinition(name="group_num", generator="random_int", type="integer",
+                                         constraint=ConstraintConfig(min=1, max=100)),
+                    ],
+                    child_fields=[
+                        FieldDefinition(name="qty", generator="random_int", type="integer",
+                                         constraint=ConstraintConfig(min=1, max=1000)),
+                        FieldDefinition(name="counterparty", generator="company", type="string"),
+                    ],
+                ),
+            ),
+        ],
+        homogeneity=100,
+        seed=7,
+    )
+    resp = generate_datasets(req)
+    table = resp.datasets[0].table_name
+    rows = db.execute(
+        f'SELECT trade_id, group_num, qty, counterparty, parent_id FROM "{table}"'
+    ).fetchall()
+    assert len(rows) == 30
+    for trade_id, group_num, qty, counterparty, parent_id in rows:
+        assert 1 <= group_num <= 100
+        assert 1 <= qty <= 1000
+        assert counterparty  # non-empty Faker company name, unaffected by this migration
+        assert parent_id is not None
+
+    # Each distinct trade_id (an SQL-generated PARENT field) must map to exactly one
+    # parent_id — proving the parent-row-per-group counting is correct, not reused
+    # across groups or regenerated per child row.
+    groups_seen: dict[str, set] = {}
+    for trade_id, _, _, _, parent_id in rows:
+        groups_seen.setdefault(trade_id, set()).add(parent_id)
+    assert all(len(pids) == 1 for pids in groups_seen.values())
+    assert len(groups_seen) == 3  # exactly 3 distinct parent trade_ids for 3 groups
+
+
+def test_sql_eligible_fields_in_grouped_dataset_with_flat_rows(db):
+    # split_pct < 100 means some rows are "flat" (ungrouped, parent_id=None), each
+    # generating its own one-off parent row — this exercises the flat_rows branch
+    # of the parent_call_count logic, not just the grouped branch.
+    req = GenerateRequest(
+        datasets=[
+            DatasetDefinition(
+                name="grouped_sql_partial",
+                rows=20,
+                group_config=GroupConfig(
+                    num_groups=2,
+                    split_pct=50,
+                    parent_fields=[
+                        FieldDefinition(name="group_num", generator="random_int", type="integer",
+                                         constraint=ConstraintConfig(min=1, max=100)),
+                    ],
+                    child_fields=[
+                        FieldDefinition(name="qty", generator="random_int", type="integer",
+                                         constraint=ConstraintConfig(min=1, max=1000)),
+                    ],
+                ),
+            ),
+        ],
+        homogeneity=100,
+        seed=9,
+    )
+    resp = generate_datasets(req)
+    table = resp.datasets[0].table_name
+    rows = db.execute(f'SELECT group_num, qty, parent_id FROM "{table}"').fetchall()
+    assert len(rows) == 20
+    flat_rows = [r for r in rows if r[2] is None]
+    grouped_rows = [r for r in rows if r[2] is not None]
+    assert len(flat_rows) == 10  # 50% of 20
+    assert len(grouped_rows) == 10
+    for group_num, qty, _ in rows:
+        assert 1 <= group_num <= 100
+        assert 1 <= qty <= 1000
+
+
+def test_condition_on_later_field_sees_sql_generated_earlier_field(db):
+    req = GenerateRequest(
+        datasets=[
+            DatasetDefinition(
+                name="condition_on_sql_field",
+                rows=200,
+                fields=[
+                    FieldDefinition(name="score", generator="random_int", type="integer",
+                                     constraint=ConstraintConfig(min=1, max=100)),
+                    FieldDefinition(name="tier", generator="random_element", type="string",
+                                     constraint=ConstraintConfig(values="gold,standard"),
+                                     condition="score >= 50"),
+                ],
+            ),
+        ],
+        homogeneity=100,
+        seed=123,
+    )
+    resp = generate_datasets(req)
+    table = resp.datasets[0].table_name
+    rows = db.execute(f'SELECT score, tier FROM "{table}"').fetchall()
+    assert len(rows) == 200
+    saw_gold_or_standard = False
+    saw_null_tier = False
+    for score, tier in rows:
+        assert 1 <= score <= 100  # score took the SQL path
+        if score >= 50:
+            assert tier in ("gold", "standard")
+            saw_gold_or_standard = True
+        else:
+            assert tier is None  # condition correctly saw the SQL-generated score and skipped tier
+            saw_null_tier = True
+    # With 200 rows and a uniform [1,100] score, both branches should appear —
+    # if this ever flakes, the seed/range no longer guarantees both branches occur.
+    assert saw_gold_or_standard
+    assert saw_null_tier
+
+
+def test_grouped_dataset_num_groups_exceeds_grouped_rows_does_not_crash(db):
+    # num_groups (100) far exceeds grouped_rows (5, since split_pct=100 and rows=5) —
+    # this used to raise IndexError once a child field took the SQL fast path.
+    req = GenerateRequest(
+        datasets=[
+            DatasetDefinition(
+                name="tiny_many_groups",
+                rows=5,
+                group_config=GroupConfig(
+                    num_groups=100,
+                    split_pct=100,
+                    parent_fields=[
+                        FieldDefinition(name="parent_marker", generator="random_int", type="integer",
+                                         constraint=ConstraintConfig(min=1, max=10)),
+                    ],
+                    child_fields=[
+                        FieldDefinition(name="qty", generator="random_int", type="integer",
+                                         constraint=ConstraintConfig(min=1, max=1000)),
+                    ],
+                ),
+            ),
+        ],
+        homogeneity=100,
+        seed=17,
+    )
+    resp = generate_datasets(req)  # must not raise
+    table = resp.datasets[0].table_name
+    rows = db.execute(f'SELECT qty FROM "{table}"').fetchall()
+    assert len(rows) >= 5  # at least the requested rows exist; over-generation (pre-existing, out of scope) may add more
+    for (qty,) in rows:
+        assert 1 <= qty <= 1000

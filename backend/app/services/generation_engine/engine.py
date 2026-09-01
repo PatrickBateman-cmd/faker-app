@@ -60,6 +60,7 @@ def generate_datasets(request: GenerateRequest) -> GenerateResponse:
                 homogeneity=request.homogeneity,
                 master_seed=master_seed,
                 overlap_pool=overlap_pool,
+                exact_field_names=exact_field_names,
             )
         else:
             dr = generate_dataset(
@@ -69,6 +70,7 @@ def generate_datasets(request: GenerateRequest) -> GenerateResponse:
                 homogeneity=request.homogeneity,
                 master_seed=master_seed,
                 overlap_pool=overlap_pool,
+                exact_field_names=exact_field_names,
             )
         dataset_results.append(dr)
 
