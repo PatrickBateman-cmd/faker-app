@@ -27,6 +27,7 @@ from app.schemas.generation import (
 )
 from app.services.generation_engine.generators import apply_constraint, generate_field_value
 from app.services.generation_engine.conditions import check_condition
+from app.services.generation_engine.fakers import build_field_fakers
 
 
 
@@ -91,23 +92,7 @@ def _generate_dataset(
             logger.exception("Failed to load shared_key pool")
             shared_key_pool = []
 
-    field_fakers: list[Faker | None] = []
-    field_uses_master: list[bool] = []
-    for field in fields:
-        if field.generator in ("shared_key", "formula", "uuid4", "uuid_int"):
-            field_fakers.append(None)
-            field_uses_master.append(False)
-        else:
-            seed_roll = random.randint(1, 100)
-            use_master = seed_roll <= homogeneity
-            field_uses_master.append(use_master)
-            if use_master:
-                field_seed = (master_seed + hash(field.name)) % (10**9)
-                fk = Faker()
-                fk.seed_instance(field_seed)
-                field_fakers.append(fk)
-            else:
-                field_fakers.append(None)
+    field_fakers = build_field_fakers(fields, homogeneity, master_seed)
 
     batch_size = 5000
     columns_formatted = ", ".join(f'"{c}"' for c in column_names)
@@ -243,35 +228,9 @@ def _generate_grouped_dataset(
     )
     db.execute(f'CREATE TABLE "{table_name}" ({col_defs})')
 
-    parent_fakers: list[Faker | None] = []
-    for field in parent_fields:
-        if field.generator in ("shared_key", "formula", "uuid4", "uuid_int"):
-            parent_fakers.append(None)
-        else:
-            seed_roll = random.randint(1, 100)
-            use_master = seed_roll <= homogeneity
-            if use_master:
-                field_seed = (master_seed + hash(f"parent_{field.name}")) % (10**9)
-                fk = Faker()
-                fk.seed_instance(field_seed)
-                parent_fakers.append(fk)
-            else:
-                parent_fakers.append(None)
+    parent_fakers = build_field_fakers(parent_fields, homogeneity, master_seed, namespace="parent_")
 
-    child_fakers: list[Faker | None] = []
-    for field in child_fields:
-        if field.generator in ("shared_key", "formula", "uuid4", "uuid_int"):
-            child_fakers.append(None)
-        else:
-            seed_roll = random.randint(1, 100)
-            use_master = seed_roll <= homogeneity
-            if use_master:
-                field_seed = (master_seed + hash(f"child_{field.name}")) % (10**9)
-                fk = Faker()
-                fk.seed_instance(field_seed)
-                child_fakers.append(fk)
-            else:
-                child_fakers.append(None)
+    child_fakers = build_field_fakers(child_fields, homogeneity, master_seed, namespace="child_")
 
     def _gen_row(fields: list, fakers: list, row_prefix: list | None = None, pool_entry: dict | None = None) -> list:
         row = list(row_prefix) if row_prefix else []
