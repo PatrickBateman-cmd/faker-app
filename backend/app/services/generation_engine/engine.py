@@ -28,30 +28,9 @@ from app.schemas.generation import (
 from app.services.generation_engine.generators import apply_constraint, generate_field_value
 from app.services.generation_engine.conditions import check_condition
 from app.services.generation_engine.fakers import build_field_fakers
+from app.services.generation_engine.overlap import build_overlap_pool, effective_fields
 
 
-
-
-def _effective_fields(ds: DatasetDefinition) -> list[FieldDefinition]:
-    if ds.group_config:
-        return ds.group_config.parent_fields + ds.group_config.child_fields
-    return ds.fields
-
-
-def _build_overlap_pool(
-    fake: Faker,
-    fields: list[FieldDefinition],
-    exact_field_names: set[str],
-    pool_size: int,
-) -> list[dict]:
-    exact_fields = [f for f in fields if f.name in exact_field_names]
-    pool = []
-    for _ in range(pool_size):
-        entry = {}
-        for field in exact_fields:
-            entry[field.name] = generate_field_value(fake, field, None)
-        pool.append(entry)
-    return pool
 
 
 def _generate_dataset(
@@ -356,7 +335,7 @@ def generate_datasets(request: GenerateRequest) -> GenerateResponse:
                             f"exact field '{ef}' is a parent field in grouped dataset '{ds.name}'; "
                             "overlap only supports child-level fields for grouped datasets"
                         )
-            ds_field_names = {f.name for f in _effective_fields(ds)}
+            ds_field_names = {f.name for f in effective_fields(ds)}
             for ef in exact_field_names:
                 if ef not in ds_field_names:
                     raise ValueError(f"exact field '{ef}' not found in dataset '{ds.name}'")
@@ -371,8 +350,8 @@ def generate_datasets(request: GenerateRequest) -> GenerateResponse:
     if overlap_ratio > 0 and request.datasets:
         pool_size = int(min(d.rows for d in request.datasets) * overlap_ratio)
         if pool_size > 0:
-            first_fields = _effective_fields(request.datasets[0])
-            overlap_pool = _build_overlap_pool(main_fake, first_fields, exact_field_names, pool_size)
+            first_fields = effective_fields(request.datasets[0])
+            overlap_pool = build_overlap_pool(main_fake, first_fields, exact_field_names, pool_size)
 
     dataset_results: list[DatasetResult] = []
     for dataset_def in request.datasets:
