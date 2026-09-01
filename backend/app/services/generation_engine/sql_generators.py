@@ -47,3 +47,28 @@ def is_sql_eligible(field: FieldDefinition, exact_field_names: set[str]) -> bool
         and field.generator not in ("formula", "shared_key")
         and field.name not in exact_field_names
     )
+
+
+def build_sql_columns(
+    db,
+    fields: list[FieldDefinition],
+    rows: int,
+    field_seeds: dict[str, int | None],
+) -> dict[str, list]:
+    columns: dict[str, list] = {}
+    for field in fields:
+        template_fn = SQL_GENERATOR_REGISTRY[field.generator]
+        expr, params = template_fn(field.constraint)
+        seed = field_seeds.get(field.name)
+        if seed is not None:
+            seed_float = (seed % 2_000_000) / 1_000_000 - 1.0
+            db.execute("SELECT setseed(?)", [seed_float])
+        if field.null_probability:
+            sql = f"SELECT CASE WHEN random() < ? THEN NULL ELSE {expr} END FROM range(?)"
+            full_params = [field.null_probability, *params, rows]
+        else:
+            sql = f"SELECT {expr} FROM range(?)"
+            full_params = [*params, rows]
+        result = db.execute(sql, full_params).fetchall()
+        columns[field.name] = [r[0] for r in result]
+    return columns

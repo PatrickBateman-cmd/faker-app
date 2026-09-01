@@ -1,7 +1,11 @@
 import uuid as uuid_mod
 
 from app.schemas.generation import ConstraintConfig, FieldDefinition
-from app.services.generation_engine.sql_generators import SQL_GENERATOR_REGISTRY, is_sql_eligible
+from app.services.generation_engine.sql_generators import (
+    SQL_GENERATOR_REGISTRY,
+    build_sql_columns,
+    is_sql_eligible,
+)
 
 
 def test_registry_has_v1_generators():
@@ -90,3 +94,47 @@ def test_ineligible_shared_key():
 def test_ineligible_formula():
     field = FieldDefinition(name="fm", generator="formula", type="string", formula="{{x}}")
     assert is_sql_eligible(field, set()) is False
+
+
+def test_build_sql_columns_returns_all_fields(db):
+    fields = [
+        FieldDefinition(name="n", generator="random_int", type="integer",
+                         constraint=ConstraintConfig(min=1, max=10)),
+        FieldDefinition(name="ok", generator="boolean", type="boolean"),
+    ]
+    columns = build_sql_columns(db, fields, 30, {"n": None, "ok": None})
+    assert set(columns.keys()) == {"n", "ok"}
+    assert len(columns["n"]) == 30
+    assert len(columns["ok"]) == 30
+    assert all(1 <= v <= 10 for v in columns["n"])
+
+
+def test_build_sql_columns_null_probability(db):
+    field = FieldDefinition(name="n", generator="random_int", type="integer",
+                             constraint=ConstraintConfig(min=1, max=10), null_probability=1.0)
+    columns = build_sql_columns(db, [field], 30, {"n": None})
+    assert all(v is None for v in columns["n"])
+
+
+def test_build_sql_columns_null_probability_partial(db):
+    field = FieldDefinition(name="n", generator="random_int", type="integer",
+                             constraint=ConstraintConfig(min=1, max=10), null_probability=0.5)
+    columns = build_sql_columns(db, [field], 500, {"n": None})
+    none_count = sum(1 for v in columns["n"] if v is None)
+    assert 150 < none_count < 350  # ~50% of 500, generous tolerance
+
+
+def test_build_sql_columns_determinism_same_seed(db):
+    field = FieldDefinition(name="n", generator="random_int", type="integer",
+                             constraint=ConstraintConfig(min=1, max=1000000))
+    a = build_sql_columns(db, [field], 20, {"n": 12345})
+    b = build_sql_columns(db, [field], 20, {"n": 12345})
+    assert a == b
+
+
+def test_build_sql_columns_different_seed_differs(db):
+    field = FieldDefinition(name="n", generator="random_int", type="integer",
+                             constraint=ConstraintConfig(min=1, max=1000000))
+    a = build_sql_columns(db, [field], 20, {"n": 111})
+    b = build_sql_columns(db, [field], 20, {"n": 222})
+    assert a != b
