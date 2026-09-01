@@ -85,6 +85,23 @@ MIGRATIONS: list[tuple[str, str]] = [
         CREATE SEQUENCE IF NOT EXISTS seq_aggregation_id START 1;
     """,
     ),
+    (
+        "007_recon_breaks",
+        """
+        CREATE SEQUENCE IF NOT EXISTS seq_recon_break_id START 1;
+        CREATE TABLE IF NOT EXISTS metadata_recon_breaks (
+            id BIGINT PRIMARY KEY DEFAULT nextval('seq_recon_break_id'),
+            run_id BIGINT NOT NULL,
+            dataset_id VARCHAR NOT NULL,
+            field_name VARCHAR NOT NULL,
+            join_key_value VARCHAR,
+            true_value VARCHAR,
+            broken_value VARCHAR,
+            break_style VARCHAR NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    """,
+    ),
 ]
 
 
