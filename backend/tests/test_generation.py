@@ -534,3 +534,41 @@ def test_sql_eligible_fields_in_grouped_dataset_with_flat_rows(db):
     for group_num, qty, _ in rows:
         assert 1 <= group_num <= 100
         assert 1 <= qty <= 1000
+
+
+def test_condition_on_later_field_sees_sql_generated_earlier_field(db):
+    req = GenerateRequest(
+        datasets=[
+            DatasetDefinition(
+                name="condition_on_sql_field",
+                rows=200,
+                fields=[
+                    FieldDefinition(name="score", generator="random_int", type="integer",
+                                     constraint=ConstraintConfig(min=1, max=100)),
+                    FieldDefinition(name="tier", generator="random_element", type="string",
+                                     constraint=ConstraintConfig(values="gold,standard"),
+                                     condition="score >= 50"),
+                ],
+            ),
+        ],
+        homogeneity=100,
+        seed=123,
+    )
+    resp = generate_datasets(req)
+    table = resp.datasets[0].table_name
+    rows = db.execute(f'SELECT score, tier FROM "{table}"').fetchall()
+    assert len(rows) == 200
+    saw_gold_or_standard = False
+    saw_null_tier = False
+    for score, tier in rows:
+        assert 1 <= score <= 100  # score took the SQL path
+        if score >= 50:
+            assert tier in ("gold", "standard")
+            saw_gold_or_standard = True
+        else:
+            assert tier is None  # condition correctly saw the SQL-generated score and skipped tier
+            saw_null_tier = True
+    # With 200 rows and a uniform [1,100] score, both branches should appear —
+    # if this ever flakes, the seed/range no longer guarantees both branches occur.
+    assert saw_gold_or_standard
+    assert saw_null_tier
