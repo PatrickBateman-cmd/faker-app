@@ -1,7 +1,7 @@
 import uuid as uuid_mod
 
 from app.schemas.generation import ConstraintConfig, FieldDefinition
-from app.services.generation_engine.sql_generators import SQL_GENERATOR_REGISTRY
+from app.services.generation_engine.sql_generators import SQL_GENERATOR_REGISTRY, is_sql_eligible
 
 
 def test_registry_has_v1_generators():
@@ -60,3 +60,33 @@ def test_uuid_int_expr_range(db):
     for (v,) in rows:
         assert isinstance(v, int)
         assert 0 <= v < (1 << 63)
+
+
+def test_eligible_plain_field():
+    field = FieldDefinition(name="n", generator="random_int", type="integer")
+    assert is_sql_eligible(field, set()) is True
+
+
+def test_ineligible_condition():
+    field = FieldDefinition(name="n", generator="random_int", type="integer", condition="age >= 18")
+    assert is_sql_eligible(field, set()) is False
+
+
+def test_ineligible_exact_field():
+    field = FieldDefinition(name="n", generator="random_int", type="integer")
+    assert is_sql_eligible(field, {"n"}) is False
+
+
+def test_ineligible_non_sql_generator():
+    field = FieldDefinition(name="e", generator="email", type="string")
+    assert is_sql_eligible(field, set()) is False
+
+
+def test_ineligible_shared_key():
+    field = FieldDefinition(name="sk", generator="shared_key", type="string")
+    assert is_sql_eligible(field, set()) is False
+
+
+def test_ineligible_formula():
+    field = FieldDefinition(name="fm", generator="formula", type="string", formula="{{x}}")
+    assert is_sql_eligible(field, set()) is False

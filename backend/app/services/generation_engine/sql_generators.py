@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from app.schemas.generation import ConstraintConfig
+from app.schemas.generation import ConstraintConfig, FieldDefinition
 
 
 def _random_int_expr(cons: ConstraintConfig | None) -> tuple[str, list]:
@@ -38,3 +38,12 @@ SQL_GENERATOR_REGISTRY: dict[str, Callable[[ConstraintConfig | None], tuple[str,
     "uuid4": _uuid4_expr,
     "uuid_int": _uuid_int_expr,
 }
+
+
+def is_sql_eligible(field: FieldDefinition, exact_field_names: set[str]) -> bool:
+    return (
+        field.generator in SQL_GENERATOR_REGISTRY
+        and not field.condition
+        and field.generator not in ("formula", "shared_key")
+        and field.name not in exact_field_names
+    )
