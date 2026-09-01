@@ -605,3 +605,68 @@ def test_grouped_dataset_num_groups_exceeds_grouped_rows_does_not_crash(db):
     assert len(rows) >= 5  # at least the requested rows exist; over-generation (pre-existing, out of scope) may add more
     for (qty,) in rows:
         assert 1 <= qty <= 1000
+
+
+def test_flat_field_breaks_applied_to_non_authoritative_dataset(db):
+    from app.schemas.generation import FieldBreakConfig
+
+    shared_fields = [
+        FieldDefinition(name="trade_id", generator="uuid4", type="string"),
+        FieldDefinition(
+            name="amount", generator="random_int", type="integer",
+            constraint=ConstraintConfig(min=10000, max=99999),
+        ),
+    ]
+    req = GenerateRequest(
+        datasets=[
+            DatasetDefinition(name="gl", rows=20, fields=list(shared_fields)),
+            DatasetDefinition(name="subledger", rows=20, fields=list(shared_fields)),
+        ],
+        homogeneity=100,
+        seed=42,
+        overlap_ratio=1.0,
+        exact_fields=["trade_id", "amount"],
+        reconciliation_mode=True,
+        field_breaks=[
+            FieldBreakConfig(field_name="amount", break_rate=1.0, break_style="drift", drift_pct=0.1)
+        ],
+    )
+    resp = generate_datasets(req)
+
+    trade_ids_0 = [r[0] for r in db.execute(f'SELECT trade_id FROM "{resp.datasets[0].table_name}"').fetchall()]
+    trade_ids_1 = [r[0] for r in db.execute(f'SELECT trade_id FROM "{resp.datasets[1].table_name}"').fetchall()]
+    assert trade_ids_0 == trade_ids_1  # join key never breaks
+
+    amounts_0 = [r[0] for r in db.execute(f'SELECT amount FROM "{resp.datasets[0].table_name}"').fetchall()]
+    amounts_1 = [r[0] for r in db.execute(f'SELECT amount FROM "{resp.datasets[1].table_name}"').fetchall()]
+    for true_v, broken_v in zip(amounts_0, amounts_1, strict=True):
+        assert abs(broken_v - true_v) <= true_v * 0.1 + 1
+
+    assert resp.break_count == 20  # one non-authoritative dataset, break_rate=1.0, 20 rows
+    gt_rows = db.execute("SELECT COUNT(*) FROM metadata_recon_breaks WHERE run_id = ?", [resp.run_id]).fetchone()[0]
+    assert gt_rows == 20
+
+
+def test_flat_field_breaks_zero_rate_no_ground_truth(db):
+    from app.schemas.generation import FieldBreakConfig
+
+    shared_fields = [
+        FieldDefinition(name="trade_id", generator="uuid4", type="string"),
+        FieldDefinition(name="amount", generator="random_int", type="integer"),
+    ]
+    req = GenerateRequest(
+        datasets=[
+            DatasetDefinition(name="gl", rows=10, fields=list(shared_fields)),
+            DatasetDefinition(name="subledger", rows=10, fields=list(shared_fields)),
+        ],
+        homogeneity=100,
+        seed=42,
+        exact_fields=["trade_id", "amount"],
+        reconciliation_mode=True,
+        field_breaks=[FieldBreakConfig(field_name="amount", break_rate=0.0)],
+    )
+    resp = generate_datasets(req)
+    amounts_0 = [r[0] for r in db.execute(f'SELECT amount FROM "{resp.datasets[0].table_name}"').fetchall()]
+    amounts_1 = [r[0] for r in db.execute(f'SELECT amount FROM "{resp.datasets[1].table_name}"').fetchall()]
+    assert amounts_0 == amounts_1
+    assert resp.break_count == 0
