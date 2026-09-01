@@ -29,6 +29,7 @@ from app.services.generation_engine.generators import apply_constraint, generate
 from app.services.generation_engine.conditions import check_condition
 from app.services.generation_engine.fakers import build_field_fakers
 from app.services.generation_engine.overlap import build_overlap_pool, effective_fields
+from app.services.generation_engine.persistence import create_table, infer_duckdb_types, persist_dataset_metadata
 
 
 
@@ -48,14 +49,11 @@ def _generate_dataset(
     validate_table_name(table_name)
 
     column_names = [validate_column_name(f.name) for f in fields]
-    col_types = _infer_duckdb_types(fields)
+    col_types = infer_duckdb_types(fields)
 
     db = DuckDBManager.get_instance()
 
-    col_defs = ", ".join(
-        f'"{name}" {dtype}' for name, dtype in zip(column_names, col_types, strict=False)
-    )
-    db.execute(f'CREATE TABLE "{table_name}" ({col_defs})')
+    create_table(db, table_name, column_names, col_types)
 
     shared_key_pool: list | None = None
     if definition.shared_key:
@@ -127,49 +125,9 @@ def _generate_dataset(
     result = db.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()
     actual_count = result[0] if result else 0
 
-    columns_json = json.dumps(column_names)
-    db.execute(
-        """
-        INSERT INTO metadata_runs (name, template_name, row_count, homogeneity, seed)
-        VALUES (?, ?, ?, ?, ?)
-        """,
-        [definition.name, definition.template or "", actual_count, homogeneity, master_seed],
+    return persist_dataset_metadata(
+        db, definition, dataset_id, table_name, run_id, homogeneity, master_seed, actual_count, column_names
     )
-    db.execute(
-        """
-        INSERT INTO metadata_datasets (dataset_id, run_id, name, table_name, columns_json, row_count, homogeneity, seed)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        [dataset_id, run_id, definition.name, table_name, columns_json, actual_count, homogeneity, master_seed],
-    )
-
-    return DatasetResult(
-        dataset_id=dataset_id,
-        name=definition.name,
-        table_name=table_name,
-        row_count=actual_count,
-        columns=column_names,
-    )
-
-
-def _infer_duckdb_types(fields: list[FieldDefinition]) -> list[str]:
-    type_map: list[str] = []
-    for f in fields:
-        t = f.type.lower()
-        if t in ("integer", "int"):
-            type_map.append("BIGINT")
-        elif t in ("float", "decimal", "number"):
-            type_map.append("DOUBLE")
-        elif t == "boolean":
-            type_map.append("BOOLEAN")
-        elif t == "date":
-            type_map.append("DATE")
-        elif t in ("datetime", "timestamp"):
-            type_map.append("TIMESTAMP")
-        else:
-            logger.debug("Unrecognized field type '%s' for field '%s', falling back to VARCHAR", f.type, f.name)
-            type_map.append("VARCHAR")
-    return type_map
 
 
 def _generate_grouped_dataset(
@@ -199,13 +157,10 @@ def _generate_grouped_dataset(
     all_fields = parent_fields + child_fields
     column_names = [validate_column_name(f.name) for f in all_fields]
     column_names.append("parent_id")
-    col_types = _infer_duckdb_types(all_fields) + ["VARCHAR"]
+    col_types = infer_duckdb_types(all_fields) + ["VARCHAR"]
 
     db = DuckDBManager.get_instance()
-    col_defs = ", ".join(
-        f'"{name}" {dtype}' for name, dtype in zip(column_names, col_types, strict=False)
-    )
-    db.execute(f'CREATE TABLE "{table_name}" ({col_defs})')
+    create_table(db, table_name, column_names, col_types)
 
     parent_fakers = build_field_fakers(parent_fields, homogeneity, master_seed, namespace="parent_")
 
@@ -289,28 +244,8 @@ def _generate_grouped_dataset(
     result = db.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()
     actual_count = result[0] if result else 0
 
-    columns_json = json.dumps(column_names)
-    db.execute(
-        """
-        INSERT INTO metadata_runs (name, template_name, row_count, homogeneity, seed)
-        VALUES (?, ?, ?, ?, ?)
-        """,
-        [definition.name, definition.template or "", actual_count, homogeneity, master_seed],
-    )
-    db.execute(
-        """
-        INSERT INTO metadata_datasets (dataset_id, run_id, name, table_name, columns_json, row_count, homogeneity, seed)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        [dataset_id, run_id, definition.name, table_name, columns_json, actual_count, homogeneity, master_seed],
-    )
-
-    return DatasetResult(
-        dataset_id=dataset_id,
-        name=definition.name,
-        table_name=table_name,
-        row_count=actual_count,
-        columns=column_names,
+    return persist_dataset_metadata(
+        db, definition, dataset_id, table_name, run_id, homogeneity, master_seed, actual_count, column_names
     )
 
 
