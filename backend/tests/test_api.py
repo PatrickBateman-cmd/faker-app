@@ -37,6 +37,13 @@ def test_generate_and_crud(client):
     resp = client.get(f"/datasets/{ds_id}")
     assert resp.status_code == 200
     assert resp.json()["name"] == "api_test"
+    assert resp.json()["run_id"] == gen["run_id"]
+
+    # List datasets echoes run_id too
+    resp = client.get("/datasets")
+    assert resp.status_code == 200
+    listed = next(d for d in resp.json() if d["dataset_id"] == ds_id)
+    assert listed["run_id"] == gen["run_id"]
 
     # Get rows
     resp = client.get(f"/datasets/{ds_id}/rows")

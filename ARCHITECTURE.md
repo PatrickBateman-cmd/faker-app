@@ -93,7 +93,7 @@ flowchart TD
         B["generation.py\nPydantic schema validation"]
     end
 
-    subgraph engine["generation_engine.py — generate_datasets()"]
+    subgraph engine["generation_engine/ (package) — generate_datasets()"]
         C["nextval('seq_run_id')\nINSERT INTO metadata_runs"]
         D{"Template\nspecified?"}
         E["template_library.py\n_load_templates_from_disk()\nfile-mtime cache hit/miss"]

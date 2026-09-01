@@ -298,8 +298,25 @@ print(f'100K rows × 15 fields: {time.time() - start:.2f}s')
 
 If the Rust build fails or produces incorrect output:
 
+`generation_engine.py` is no longer a single file — as of the generation-engine
+refactor it is the package directory `backend/app/services/generation_engine/`
+(10 files: `fakers.py`, `row_builder.py`, `generators.py`, `flat.py`,
+`grouped.py`, etc.). A plain `git checkout -- backend/app/services/generation_engine.py`
+will silently no-op (or fail) against that path — it does not restore a
+directory. To roll back:
+
 ```sh
-git checkout -- backend/app/services/generation_engine.py
+# Remove the package directory introduced by the refactor
+git rm -r backend/app/services/generation_engine/
+
+# Restore the pre-refactor single-file module from history — replace
+# <pre-refactor-sha> with the commit before the generation-engine refactor
+git checkout <pre-refactor-sha> -- backend/app/services/generation_engine.py
+
 pip uninstall faker-engine
-maturin build fails → Python generation_engine is unchanged, app continues working. The Rust module is only called from the modified generation_engine.py, so reverting that file fully restores the Python path.
 ```
+
+If `maturin build` fails, the Python `generation_engine` package is
+unchanged, and the app continues working — the Rust module is only called
+from the modified generation loop (`row_builder.py` / `generators.py`), so
+reverting to the pre-refactor single file fully restores the Python path.

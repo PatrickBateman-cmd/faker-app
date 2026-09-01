@@ -1,18 +1,41 @@
+import { DndContext, closestCenter } from "@dnd-kit/core";
+import { SortableContext, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { deleteDataset, fetchDatasetRows, fetchDatasets } from "../../api/datasets";
 import AggregationPanel from "../AggregationPanel/AggregationPanel";
 import DedupPanel from "../DedupPanel/DedupPanel";
 import { DatasetChart } from "../DatasetChart/DatasetChart";
+import { CollapsibleSection } from "../CollapsibleSection/CollapsibleSection";
 import { useToast } from "../../hooks/useToast";
+
+type SectionKey = "data" | "chart" | "aggregate" | "dedup";
+const SECTION_LABELS: Record<SectionKey, string> = {
+  data: "Data",
+  chart: "Chart",
+  aggregate: "Aggregate",
+  dedup: "Dedup",
+};
+const ALL_SECTIONS: SectionKey[] = ["data", "chart", "aggregate", "dedup"];
+const DEFAULT_COLLAPSED = new Set<SectionKey>(["chart", "aggregate", "dedup"]);
 
 export function ResultsViewer({ preselectedDatasetId }: { preselectedDatasetId?: string }) {
   const { addToast } = useToast();
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(preselectedDatasetId ?? null);
   const [page, setPage] = useState(1);
-  const [mode, setMode] = useState<"data" | "chart" | "aggregate" | "dedup">("data");
+  const [sectionOrder, setSectionOrder] = useState<SectionKey[]>(ALL_SECTIONS);
+  const [collapsedSections, setCollapsedSections] = useState<Set<SectionKey>>(new Set(DEFAULT_COLLAPSED));
   const [exportOpen, setExportOpen] = useState(false);
+
+  function toggleSectionCollapsed(key: SectionKey) {
+    setCollapsedSections((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
 
   const list = useQuery({
     queryKey: ["datasets"],
@@ -47,7 +70,7 @@ export function ResultsViewer({ preselectedDatasetId }: { preselectedDatasetId?:
 
   const handleTransformResult = () => {
     queryClient.invalidateQueries({ queryKey: ["datasets"] });
-    setMode("data");
+    setCollapsedSections(new Set(DEFAULT_COLLAPSED));
   };
 
   return (
@@ -61,30 +84,43 @@ export function ResultsViewer({ preselectedDatasetId }: { preselectedDatasetId?:
           <p className="text-sm text-[var(--muted)]">No datasets yet. Generate one!</p>
         )}
         <div className="flex flex-col gap-1 overflow-y-auto">
-          {(list.data ?? []).map((ds) => (
-            <div
-              key={ds.dataset_id}
-              onClick={() => {
-                setSelectedId(ds.dataset_id);
-                setPage(1);
-                setMode("data");
-              }}
-              className={`px-3 py-2 rounded cursor-pointer text-sm transition-colors ${
-                selectedId === ds.dataset_id
-                  ? "bg-[var(--selection)] text-[var(--accent)] border border-[var(--accent)]"
-                  : "text-[var(--muted)] hover:bg-[var(--elevated)] border border-transparent"
-              }`}
-            >
-              <div className="truncate font-medium">{ds.name}</div>
-              <div className="text-xs text-[var(--muted)] mt-0.5">
-                {ds.row_count.toLocaleString()} rows ·{" "}
-                {ds.columns.length} cols
+          {(list.data ?? []).map((ds, idx) => {
+            const all = list.data ?? [];
+            const sameRunAsPrev = idx > 0 && all[idx - 1].run_id === ds.run_id;
+            const sameRunAsNext = idx < all.length - 1 && all[idx + 1].run_id === ds.run_id;
+            const groupedWithNeighbor = sameRunAsPrev || sameRunAsNext;
+            return (
+              <div
+                key={ds.dataset_id}
+                onClick={() => {
+                  setSelectedId(ds.dataset_id);
+                  setPage(1);
+                  setCollapsedSections(new Set(DEFAULT_COLLAPSED));
+                }}
+                className={`px-3 py-2 rounded cursor-pointer text-sm transition-colors border-l-2 ${
+                  groupedWithNeighbor ? "border-l-[var(--accent)]" : "border-l-transparent"
+                } ${
+                  selectedId === ds.dataset_id
+                    ? "bg-[var(--selection)] text-[var(--accent)] border border-[var(--accent)]"
+                    : "text-[var(--muted)] hover:bg-[var(--elevated)] border border-transparent"
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="truncate font-medium">{ds.name}</div>
+                  <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-[var(--elevated)] text-[var(--muted)]">
+                    Run #{ds.run_id}
+                  </span>
+                </div>
+                <div className="text-xs text-[var(--muted)] mt-0.5">
+                  {ds.row_count.toLocaleString()} rows ·{" "}
+                  {ds.columns.length} cols
+                </div>
+                <div className="text-xs text-[var(--muted)] font-mono">
+                  {ds.dataset_id}
+                </div>
               </div>
-              <div className="text-xs text-[var(--muted)] font-mono">
-                {ds.dataset_id}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
@@ -96,38 +132,34 @@ export function ResultsViewer({ preselectedDatasetId }: { preselectedDatasetId?:
         )}
 
         {selectedId && (
-          <div className="flex flex-col gap-4">
-            {/* Tab bar */}
-            <div className="flex gap-1 border-b border-[var(--border)]">
-              {(["data", "chart", "aggregate", "dedup"] as const).map((m) => (
-                <button
-                  key={m}
-                  onClick={() => setMode(m)}
-                  className={`px-4 py-2 text-sm font-medium rounded-t transition-colors ${
-                    mode === m
-                      ? "bg-[var(--elevated)] text-[var(--text)] border border-b-transparent border-[var(--border)]"
-                      : "text-[var(--muted)] hover:text-[var(--text)]"
-                  }`}
-                >
-                  {m === "data"
-                    ? "Data"
-                    : m === "chart"
-                      ? "Chart"
-                      : m === "aggregate"
-                        ? "Aggregate"
-                        : "Dedup"}
-                </button>
-              ))}
-            </div>
-
-            {mode === "data" && rows.isPending && (
+          <DndContext collisionDetection={closestCenter} onDragEnd={(e) => {
+            const { active, over } = e;
+            if (over && active.id !== over.id) {
+              const activeKey = active.id.toString().replace("section-", "") as SectionKey;
+              const overKey = over.id.toString().replace("section-", "") as SectionKey;
+              const oldIndex = sectionOrder.indexOf(activeKey);
+              const newIndex = sectionOrder.indexOf(overKey);
+              setSectionOrder((prev) => arrayMove(prev, oldIndex, newIndex));
+            }
+          }}>
+          <SortableContext items={sectionOrder.map((k) => `section-${k}`)} strategy={verticalListSortingStrategy}>
+          <div className="flex flex-col gap-3">
+            {sectionOrder.map((key) => (
+              <CollapsibleSection
+                key={key}
+                id={`section-${key}`}
+                title={SECTION_LABELS[key]}
+                collapsed={collapsedSections.has(key)}
+                onToggleCollapse={() => toggleSectionCollapsed(key)}
+              >
+            {key === "data" && rows.isPending && (
               <p className="text-sm text-[var(--muted)]">Loading data...</p>
             )}
-            {mode === "data" && rows.error && (
+            {key === "data" && rows.error && (
               <p className="text-sm text-[var(--red)]">{rows.error.message}</p>
             )}
 
-            {mode === "data" && rows.data && rows.data.meta && (
+            {key === "data" && rows.data && rows.data.meta && (
               <div className="flex flex-col gap-4">
                 <div className="flex items-center justify-between">
                   <div>
@@ -140,6 +172,10 @@ export function ResultsViewer({ preselectedDatasetId }: { preselectedDatasetId?:
                       h={rows.data.meta.homogeneity}%
                       {rows.data.meta.seed != null &&
                         ` · seed=${rows.data.meta.seed}`}
+                      {" · "}
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--elevated)] text-[var(--muted)]">
+                        Run #{rows.data.meta.run_id}
+                      </span>
                     </p>
                   </div>
                   <div className="flex gap-2">
@@ -262,28 +298,32 @@ export function ResultsViewer({ preselectedDatasetId }: { preselectedDatasetId?:
               </div>
             )}
 
-            {mode === "chart" && (
+            {key === "chart" && (
               <DatasetChart datasetId={selectedId} />
             )}
 
-            {mode === "aggregate" && selectedMeta && (
+            {key === "aggregate" && selectedMeta && (
               <AggregationPanel
                 datasetId={selectedId}
                 columns={selectedMeta.columns}
                 onResult={handleTransformResult}
-                onBack={() => setMode("data")}
+                onBack={() => toggleSectionCollapsed("aggregate")}
               />
             )}
 
-            {mode === "dedup" && selectedMeta && (
+            {key === "dedup" && selectedMeta && (
               <DedupPanel
                 datasetId={selectedId}
                 columns={selectedMeta.columns}
                 onResult={handleTransformResult}
-                onBack={() => setMode("data")}
+                onBack={() => toggleSectionCollapsed("dedup")}
               />
             )}
+              </CollapsibleSection>
+            ))}
           </div>
+          </SortableContext>
+          </DndContext>
         )}
       </div>
     </div>

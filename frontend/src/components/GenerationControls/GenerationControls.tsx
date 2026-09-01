@@ -5,6 +5,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { fetchTemplate, fetchTemplates, generateDatasets } from "../../api/generation";
 import { GenerationResults } from "../ResultsViewer/ResultsViewer";
+import { CollapsibleSection } from "../CollapsibleSection/CollapsibleSection";
 import type {
   DatasetDefinition,
   DatasetResult,
@@ -91,6 +92,7 @@ export function GenerationControls({ onNavigate, pendingTemplate: externalTempla
   const [results, setResults] = useState<DatasetResult[] | null>(null);
   const [overlapPoolSize, setOverlapPoolSize] = useState<number>(0);
   const [resultExactFields, setResultExactFields] = useState<string[]>([]);
+  const [collapsedDatasets, setCollapsedDatasets] = useState<Set<number>>(new Set());
 
   const templates = useQuery({
     queryKey: ["templates"],
@@ -179,6 +181,20 @@ export function GenerationControls({ onNavigate, pendingTemplate: externalTempla
       ...d,
       fields: arrayMove(d.fields, oldIndex, newIndex),
     }));
+  }
+
+  function toggleDatasetCollapsed(dsIndex: number) {
+    setCollapsedDatasets((prev) => {
+      const next = new Set(prev);
+      if (next.has(dsIndex)) next.delete(dsIndex);
+      else next.add(dsIndex);
+      return next;
+    });
+  }
+
+  function moveDataset(oldIndex: number, newIndex: number) {
+    setDatasets((prev) => arrayMove(prev, oldIndex, newIndex));
+    setResults(null);
   }
 
   function updateField(dsIndex: number, fieldIndex: number, updater: (f: FieldDef) => FieldDef) {
@@ -307,6 +323,11 @@ export function GenerationControls({ onNavigate, pendingTemplate: externalTempla
               placeholder="e.g. customer_id, email"
               className="w-48 bg-[var(--surface)] border border-[var(--border)] rounded px-2 py-1 text-sm text-[var(--text)] placeholder:text-[var(--muted)] focus:outline-none focus:border-cyan-700"
             />
+            {mode === "grouped" && (
+              <span className="text-xs text-[var(--muted)]">
+                Grouped datasets: must be a child field, not a parent field.
+              </span>
+            )}
           </div>
         )}
       </div>
@@ -335,11 +356,24 @@ export function GenerationControls({ onNavigate, pendingTemplate: externalTempla
         </label>
       </div>
 
-      <div className="flex gap-4 flex-1 min-h-0 overflow-auto">
+      <DndContext collisionDetection={closestCenter} onDragEnd={(e) => {
+        const { active, over } = e;
+        if (over && active.id !== over.id) {
+          const oldIndex = parseInt(active.id.toString().split("-")[1]);
+          const newIndex = parseInt(over.id.toString().split("-")[1]);
+          moveDataset(oldIndex, newIndex);
+        }
+      }}>
+      <SortableContext items={datasets.map((_, i) => `dataset-${i}`)} strategy={verticalListSortingStrategy}>
+      <div className="flex gap-4 flex-1 min-h-0 overflow-auto items-start">
         {datasets.map((ds, dsIndex) => (
-          <div
+          <CollapsibleSection
             key={dsIndex}
-            className="flex-1 min-w-0 bg-[var(--surface)] border border-[var(--border)] rounded p-4 flex flex-col gap-3"
+            id={`dataset-${dsIndex}`}
+            title={ds.name || `Dataset ${dsIndex + 1}`}
+            collapsed={collapsedDatasets.has(dsIndex)}
+            onToggleCollapse={() => toggleDatasetCollapsed(dsIndex)}
+            className="flex-1 min-w-0"
           >
             <div className="flex items-center justify-between">
               <input
@@ -619,9 +653,11 @@ export function GenerationControls({ onNavigate, pendingTemplate: externalTempla
                 </button>
               </>
             )}
-          </div>
+          </CollapsibleSection>
         ))}
       </div>
+      </SortableContext>
+      </DndContext>
 
       <div className="flex items-center gap-4">
         <button

@@ -270,4 +270,4 @@ The following security controls are in place:
 
 ## Planned: Rust generation engine (MIGRATION.md)
 
-The generation hot path (`_generate_field_value`) is planned to move to a Rust PyO3 extension (`faker_engine.so`) using `maturin`, `rayon` (parallel), and the `fake` crate. This would replace the inner loop in `generation_engine.py` with a call to `gen_rows()` while keeping all DuckDB + metadata logic in Python. **Not yet implemented.**
+The generation hot path (`_generate_field_value`) is planned to move to a Rust PyO3 extension (`faker_engine.so`) using `maturin`, `rayon` (parallel), and the `fake` crate. This would replace the hot-loop logic in `generation_engine/row_builder.py` and `generation_engine/generators.py` with a call to `gen_rows()` while keeping all DuckDB + metadata logic in Python. **Not yet implemented.**
