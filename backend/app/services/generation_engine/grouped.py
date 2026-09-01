@@ -59,6 +59,20 @@ def generate_grouped_dataset(
     child_seeds = roll_field_seeds(child_fields, homogeneity, master_seed, namespace="child_")
     child_fakers = fakers_from_seeds(child_seeds)
 
+    # Distribute grouped_rows randomly across num_groups.
+    # This must be computed before sql_child_columns is sized, since over-generation
+    # from the diff-correction/clamping logic below can make sum(group_sizes) > grouped_rows.
+    if grouped_enabled:
+        raw_weights = [random.random() for _ in range(num_groups)]
+        total_weight = sum(raw_weights)
+        group_sizes = [max(1, int(grouped_rows * w / total_weight)) for w in raw_weights]
+        diff = grouped_rows - sum(group_sizes)
+        for i in range(abs(diff)):
+            group_sizes[i % num_groups] += 1 if diff > 0 else -1
+        group_sizes = [max(1, s) for s in group_sizes]
+    else:
+        group_sizes = []
+
     parent_call_count = (num_groups if grouped_enabled else 0) + flat_rows
     sql_parent_fields = [f for f in parent_fields if is_sql_eligible(f, exact_names)]
     if sql_parent_fields:
@@ -67,10 +81,11 @@ def generate_grouped_dataset(
     else:
         sql_parent_columns = {}
 
+    child_call_count = sum(group_sizes) + flat_rows
     sql_child_fields = [f for f in child_fields if is_sql_eligible(f, exact_names)]
     if sql_child_fields:
         child_seeds_by_name = {f.name: child_seeds[i] for i, f in enumerate(child_fields)}
-        sql_child_columns = build_sql_columns(db, sql_child_fields, total_rows, child_seeds_by_name)
+        sql_child_columns = build_sql_columns(db, sql_child_fields, child_call_count, child_seeds_by_name)
     else:
         sql_child_columns = {}
 
@@ -91,16 +106,7 @@ def generate_grouped_dataset(
         parent_call_idx += 1
         return parent_row
 
-    # Distribute grouped_rows randomly across num_groups
     if grouped_enabled:
-        raw_weights = [random.random() for _ in range(num_groups)]
-        total_weight = sum(raw_weights)
-        group_sizes = [max(1, int(grouped_rows * w / total_weight)) for w in raw_weights]
-        diff = grouped_rows - sum(group_sizes)
-        for i in range(abs(diff)):
-            group_sizes[i % num_groups] += 1 if diff > 0 else -1
-        group_sizes = [max(1, s) for s in group_sizes]
-
         for g_idx in range(num_groups):
             parent_id = str(uuid.uuid4())
             parent_row = _next_parent_row()

@@ -138,3 +138,35 @@ def test_build_sql_columns_different_seed_differs(db):
     a = build_sql_columns(db, [field], 20, {"n": 111})
     b = build_sql_columns(db, [field], 20, {"n": 222})
     assert a != b
+
+
+def test_unseeded_field_decorrelated_across_calls(db):
+    # Two consecutive build_sql_columns calls for the same unseeded field must NOT
+    # produce identical output — this is the regression this fix closes (previously,
+    # an unseeded field inherited whatever setseed() state a prior call left behind).
+    field = FieldDefinition(name="u", generator="uuid4", type="string")
+    a = build_sql_columns(db, [field], 10, {"u": None})
+    b = build_sql_columns(db, [field], 10, {"u": None})
+    assert a != b
+
+
+def test_random_int_min_greater_than_max_raises():
+    import pytest
+    with pytest.raises(ValueError, match="min <= max"):
+        SQL_GENERATOR_REGISTRY["random_int"](ConstraintConfig(min=10, max=1))
+
+
+def test_pydecimal_min_greater_than_max_raises():
+    import pytest
+    with pytest.raises(ValueError, match="min <= max"):
+        SQL_GENERATOR_REGISTRY["pydecimal"](ConstraintConfig(min=10, max=1))
+
+
+def test_pydecimal_expr_respects_bounds_when_not_exactly_representable(db):
+    expr, params = SQL_GENERATOR_REGISTRY["pydecimal"](
+        ConstraintConfig(min=0.004, max=9.996, right_digits=2)
+    )
+    sql = f"SELECT {expr} FROM range(?)"
+    rows = db.execute(sql, [*params, 5000]).fetchall()
+    for (v,) in rows:
+        assert 0.004 <= v <= 9.996

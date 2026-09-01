@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 from typing import Callable
 
 from app.schemas.generation import ConstraintConfig, FieldDefinition
@@ -8,14 +9,21 @@ from app.schemas.generation import ConstraintConfig, FieldDefinition
 def _random_int_expr(cons: ConstraintConfig | None) -> tuple[str, list]:
     cmin = int(cons.min) if cons and cons.min is not None else 0
     cmax = int(cons.max) if cons and cons.max is not None else 999999
+    if cmin > cmax:
+        raise ValueError(f"random_int/pyint constraint requires min <= max, got min={cmin}, max={cmax}")
     return "CAST(FLOOR(random() * (? - ? + 1)) + ? AS BIGINT)", [cmax, cmin, cmin]
 
 
 def _pydecimal_expr(cons: ConstraintConfig | None) -> tuple[str, list]:
     cmin = float(cons.min) if cons and cons.min is not None else 0.0
     cmax = float(cons.max) if cons and cons.max is not None else 999999.99
+    if cmin > cmax:
+        raise ValueError(f"pydecimal constraint requires min <= max, got min={cmin}, max={cmax}")
     right_digits = cons.right_digits if cons and cons.right_digits is not None else 2
-    return "ROUND(? + random() * (? - ?), ?)", [cmin, cmax, cmin, right_digits]
+    return (
+        "GREATEST(?, LEAST(?, ROUND(? + random() * (? - ?), ?)))",
+        [cmin, cmax, cmin, cmax, cmin, right_digits],
+    )
 
 
 def _boolean_expr(cons: ConstraintConfig | None) -> tuple[str, list]:
@@ -62,7 +70,9 @@ def build_sql_columns(
         seed = field_seeds.get(field.name)
         if seed is not None:
             seed_float = (seed % 2_000_000) / 1_000_000 - 1.0
-            db.execute("SELECT setseed(?)", [seed_float])
+        else:
+            seed_float = random.uniform(-1.0, 1.0)
+        db.execute("SELECT setseed(?)", [seed_float])
         if field.null_probability:
             sql = f"SELECT CASE WHEN random() < ? THEN NULL ELSE {expr} END FROM range(?)"
             full_params = [field.null_probability, *params, rows]

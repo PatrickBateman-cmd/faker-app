@@ -572,3 +572,36 @@ def test_condition_on_later_field_sees_sql_generated_earlier_field(db):
     # if this ever flakes, the seed/range no longer guarantees both branches occur.
     assert saw_gold_or_standard
     assert saw_null_tier
+
+
+def test_grouped_dataset_num_groups_exceeds_grouped_rows_does_not_crash(db):
+    # num_groups (100) far exceeds grouped_rows (5, since split_pct=100 and rows=5) —
+    # this used to raise IndexError once a child field took the SQL fast path.
+    req = GenerateRequest(
+        datasets=[
+            DatasetDefinition(
+                name="tiny_many_groups",
+                rows=5,
+                group_config=GroupConfig(
+                    num_groups=100,
+                    split_pct=100,
+                    parent_fields=[
+                        FieldDefinition(name="parent_marker", generator="random_int", type="integer",
+                                         constraint=ConstraintConfig(min=1, max=10)),
+                    ],
+                    child_fields=[
+                        FieldDefinition(name="qty", generator="random_int", type="integer",
+                                         constraint=ConstraintConfig(min=1, max=1000)),
+                    ],
+                ),
+            ),
+        ],
+        homogeneity=100,
+        seed=17,
+    )
+    resp = generate_datasets(req)  # must not raise
+    table = resp.datasets[0].table_name
+    rows = db.execute(f'SELECT qty FROM "{table}"').fetchall()
+    assert len(rows) >= 5  # at least the requested rows exist; over-generation (pre-existing, out of scope) may add more
+    for (qty,) in rows:
+        assert 1 <= qty <= 1000
