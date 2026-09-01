@@ -1071,7 +1071,7 @@ Expected: all PASS — same test count and outcomes as the Task 1 baseline.
 - [ ] **Step 2: Confirm every module in the target structure exists and engine.py stayed small**
 
 Run: `wc -l backend/app/services/generation_engine/*.py`
-Expected: 9 files (`__init__.py`, `generators.py`, `conditions.py`, `fakers.py`, `overlap.py`, `persistence.py`, `row_builder.py`, `flat.py`, `grouped.py`, `engine.py` — 10 total including `engine.py`), each well under the original 591-line monolith, no file re-growing back into a everything-in-one-place shape.
+Expected: 10 files (`__init__.py`, `generators.py`, `conditions.py`, `fakers.py`, `overlap.py`, `persistence.py`, `row_builder.py`, `flat.py`, `grouped.py`, `engine.py`), each well under the original 591-line monolith, no file re-growing back into an everything-in-one-place shape.
 
 - [ ] **Step 3: Confirm external imports still work unchanged**
 
