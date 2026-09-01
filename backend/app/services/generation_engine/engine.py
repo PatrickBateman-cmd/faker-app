@@ -25,6 +25,7 @@ from app.schemas.generation import (
     GenerateResponse,
     GroupConfig,
 )
+from app.services.generation_engine.generators import apply_constraint, generate_field_value
 
 
 def _check_condition(condition: str, row: list, fields: list) -> bool:
@@ -67,112 +68,6 @@ def _check_condition(condition: str, row: list, fields: list) -> bool:
         return False
 
 
-def _apply_constraint(fake: Faker, value: object, constraint: ConstraintConfig | None) -> object:
-    if constraint is None:
-        return value
-    if isinstance(value, (int, float)):
-        cmin = constraint.min if constraint.min is not None else float("-inf")
-        cmax = constraint.max if constraint.max is not None else float("inf")
-        if isinstance(value, float) and constraint.right_digits is not None:
-            value = round(value, constraint.right_digits)
-        return max(cmin, min(cmax, value))
-    return value
-
-
-def _generate_field_value(fake: Faker, field: FieldDefinition, constraint: ConstraintConfig | None) -> object:
-    gen = field.generator
-    cons = constraint or field.constraint
-
-    if gen == "first_name":
-        return _apply_constraint(fake, fake.first_name(), cons)
-    elif gen == "last_name":
-        return _apply_constraint(fake, fake.last_name(), cons)
-    elif gen == "name":
-        return _apply_constraint(fake, fake.name(), cons)
-    elif gen == "email":
-        return _apply_constraint(fake, fake.email(), cons)
-    elif gen == "phone_number":
-        return _apply_constraint(fake, fake.phone_number(), cons)
-    elif gen == "job":
-        return _apply_constraint(fake, fake.job(), cons)
-    elif gen == "company":
-        return _apply_constraint(fake, fake.company(), cons)
-    elif gen in ("company_suffix",):
-        return _apply_constraint(fake, fake.company_suffix(), cons)
-    elif gen == "catch_phrase":
-        return _apply_constraint(fake, fake.catch_phrase(), cons)
-    elif gen == "domain_name":
-        return _apply_constraint(fake, fake.domain_name(), cons)
-    elif gen == "url":
-        return _apply_constraint(fake, fake.url(), cons)
-    elif gen == "country":
-        return _apply_constraint(fake, fake.country(), cons)
-    elif gen == "country_code":
-        return _apply_constraint(fake, fake.country_code(), cons)
-    elif gen == "city":
-        return _apply_constraint(fake, fake.city(), cons)
-    elif gen == "street_address":
-        return _apply_constraint(fake, fake.street_address(), cons)
-    elif gen == "zipcode":
-        return _apply_constraint(fake, fake.zipcode(), cons)
-    elif gen == "text":
-        max_len = int(cons.max) if cons and cons.max else 100
-        return _apply_constraint(fake, fake.text(max_nb_chars=max_len), cons)
-    elif gen == "boolean":
-        return _apply_constraint(fake, fake.boolean(), cons)
-    elif gen in ("random_int", "pyint"):
-        cmin = int(cons.min) if cons and cons.min is not None else 0
-        cmax = int(cons.max) if cons and cons.max is not None else 999999
-        return _apply_constraint(fake, fake.random_int(min=cmin, max=cmax), cons)
-    elif gen == "pydecimal":
-        cmin = float(cons.min) if cons and cons.min is not None else 0.0
-        cmax = float(cons.max) if cons and cons.max is not None else 999999.99
-        digits = cons.right_digits if cons and cons.right_digits is not None else 2
-        val = fake.pydecimal(min_value=cmin, max_value=cmax, right_digits=digits)
-        return _apply_constraint(fake, float(val), cons)
-    elif gen == "uuid4":
-        return str(uuid.uuid4())
-    elif gen == "uuid_int":
-        return uuid.uuid4().int & ((1 << 63) - 1)
-    elif gen == "bothify":
-        fmt = cons.format if cons and cons.format else "?????#####"
-        return _apply_constraint(fake, fake.bothify(text=fmt), cons)
-    elif gen == "random_element":
-        if cons and cons.values:
-            vals = [v.strip() for v in cons.values.split(",")]
-            if cons.weights:
-                weights = [float(w.strip()) for w in cons.weights.split(",")]
-                return _apply_constraint(fake, random.choices(vals, weights=weights, k=1)[0], cons)
-            return _apply_constraint(fake, fake.random_element(vals), cons)
-        return _apply_constraint(fake, fake.word(), cons)
-    elif gen == "currency_code":
-        return _apply_constraint(fake, fake.currency_code(), cons)
-    elif gen == "swift":
-        return _apply_constraint(fake, fake.swift8(), cons)
-    elif gen == "iban":
-        return _apply_constraint(fake, fake.iban(), cons)
-    elif gen == "bban":
-        return _apply_constraint(fake, fake.bban(), cons)
-    elif gen == "date_between":
-        start = cons.start if cons and cons.start else "-5y"
-        end = cons.end if cons and cons.end else "today"
-        return _apply_constraint(fake, fake.date_between(start_date=start, end_date=end).isoformat(), cons)
-    elif gen == "date_of_birth":
-        min_age = cons.min_age if cons and cons.min_age is not None else 18
-        max_age = cons.max_age if cons and cons.max_age is not None else 99
-        dob = fake.date_of_birth(minimum_age=min_age, maximum_age=max_age)
-        return _apply_constraint(fake, dob.isoformat(), cons)
-    elif gen == "date_time":
-        return _apply_constraint(fake, fake.date_time().isoformat(), cons)
-    elif gen == "formula":
-        return _apply_constraint(fake, field.formula or "", cons)
-    elif gen == "shared_key":
-        return _apply_constraint(fake, "", cons)
-    elif gen == "word":
-        return _apply_constraint(fake, fake.word(), cons)
-    else:
-        logger.warning("Unknown generator '%s' for field '%s', falling back to fake.word()", gen, field.name)
-        return _apply_constraint(fake, fake.word(), cons)
 
 
 def _effective_fields(ds: DatasetDefinition) -> list[FieldDefinition]:
@@ -192,7 +87,7 @@ def _build_overlap_pool(
     for _ in range(pool_size):
         entry = {}
         for field in exact_fields:
-            entry[field.name] = _generate_field_value(fake, field, None)
+            entry[field.name] = generate_field_value(fake, field, None)
         pool.append(entry)
     return pool
 
@@ -297,7 +192,7 @@ def _generate_dataset(
                     continue
 
                 fk = field_fakers[fi] or fake
-                val = _generate_field_value(fk, field, None)
+                val = generate_field_value(fk, field, None)
                 row.append(val)
 
             batch_data.append(row)
@@ -440,7 +335,7 @@ def _generate_grouped_dataset(
                     row.append(field.formula or "")
                 continue
             fk = fakers[fi] or fake
-            row.append(_generate_field_value(fk, field, None))
+            row.append(generate_field_value(fk, field, None))
         return row
 
     batch_size = 5000
