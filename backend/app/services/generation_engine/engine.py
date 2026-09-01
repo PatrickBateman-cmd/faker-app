@@ -8,8 +8,6 @@ import logging
 
 from datetime import datetime
 
-from jinja2 import Template as JinjaTemplate
-
 from faker import Faker
 
 logger = logging.getLogger(__name__)
@@ -25,11 +23,11 @@ from app.schemas.generation import (
     GenerateResponse,
     GroupConfig,
 )
-from app.services.generation_engine.generators import apply_constraint, generate_field_value
-from app.services.generation_engine.conditions import check_condition
+from app.services.generation_engine.generators import apply_constraint
 from app.services.generation_engine.fakers import build_field_fakers
 from app.services.generation_engine.overlap import build_overlap_pool, effective_fields
 from app.services.generation_engine.persistence import create_table, infer_duckdb_types, persist_dataset_metadata
+from app.services.generation_engine.row_builder import generate_row
 
 
 
@@ -84,39 +82,13 @@ def _generate_dataset(
 
         for row_idx in range(batch_start, batch_end):
             pool_entry = pool[row_idx] if row_idx < len(pool) else {}
-            row: list = []
-            for fi, field in enumerate(fields):
-                if field.name in pool_entry:
-                    row.append(pool_entry[field.name])
-                    continue
-
-                if field.null_probability and random.random() < field.null_probability:
-                    row.append(None)
-                    continue
-
-                if field.condition:
-                    if not check_condition(field.condition, row, fields):
-                        row.append(None)
-                        continue
-
-                if field.generator == "shared_key" and shared_key_pool is not None:
-                    val = random.choice(shared_key_pool) if shared_key_pool else None
-                    row.append(val)
-                    continue
-
-                if field.generator == "formula":
-                    try:
-                        t = JinjaTemplate(field.formula or "")
-                        already = {f.name: row[idx] for idx, f in enumerate(fields[:fi])}
-                        row.append(t.render(**already))
-                    except Exception:
-                        logger.exception("Formula evaluation failed for field '%s'", field.name)
-                        row.append(field.formula or "")
-                    continue
-
-                fk = field_fakers[fi] or fake
-                val = generate_field_value(fk, field, None)
-                row.append(val)
+            row = generate_row(
+                fields,
+                field_fakers,
+                fake,
+                pool_entry=pool_entry,
+                shared_key_pool=shared_key_pool,
+            )
 
             batch_data.append(row)
 
@@ -166,32 +138,6 @@ def _generate_grouped_dataset(
 
     child_fakers = build_field_fakers(child_fields, homogeneity, master_seed, namespace="child_")
 
-    def _gen_row(fields: list, fakers: list, row_prefix: list | None = None, pool_entry: dict | None = None) -> list:
-        row = list(row_prefix) if row_prefix else []
-        pool_entry = pool_entry or {}
-        for fi, field in enumerate(fields):
-            if field.name in pool_entry:
-                row.append(pool_entry[field.name])
-                continue
-            if field.null_probability and random.random() < field.null_probability:
-                row.append(None)
-                continue
-            if field.condition:
-                if not check_condition(field.condition, row, fields):
-                    row.append(None)
-                    continue
-            if field.generator == "formula":
-                try:
-                    t = JinjaTemplate(field.formula or "")
-                    already = {f.name: row[idx] for idx, f in enumerate(fields[:fi])}
-                    row.append(t.render(**already))
-                except Exception:
-                    row.append(field.formula or "")
-                continue
-            fk = fakers[fi] or fake
-            row.append(generate_field_value(fk, field, None))
-        return row
-
     batch_size = 5000
     columns_formatted = ", ".join(f'"{c}"' for c in column_names)
     placeholders = ", ".join(["?"] * len(column_names))
@@ -213,13 +159,13 @@ def _generate_grouped_dataset(
 
         for g_idx in range(num_groups):
             parent_id = str(uuid.uuid4())
-            parent_row = _gen_row(parent_fields, parent_fakers)
+            parent_row = generate_row(parent_fields, parent_fakers, fake)
 
             child_count = group_sizes[g_idx]
             for _ in range(child_count):
                 pool_entry = pool[row_idx] if row_idx < len(pool) else {}
                 row_idx += 1
-                child_row = _gen_row(child_fields, child_fakers, pool_entry=pool_entry)
+                child_row = generate_row(child_fields, child_fakers, fake, pool_entry=pool_entry)
                 batch_data.append(parent_row + child_row + [parent_id])
 
                 if len(batch_data) >= batch_size:
@@ -228,10 +174,10 @@ def _generate_grouped_dataset(
 
     # Flat rows
     for _ in range(flat_rows):
-        parent_row = _gen_row(parent_fields, parent_fakers)
+        parent_row = generate_row(parent_fields, parent_fakers, fake)
         pool_entry = pool[row_idx] if row_idx < len(pool) else {}
         row_idx += 1
-        child_row = _gen_row(child_fields, child_fakers, pool_entry=pool_entry)
+        child_row = generate_row(child_fields, child_fakers, fake, pool_entry=pool_entry)
         batch_data.append(parent_row + child_row + [None])
 
         if len(batch_data) >= batch_size:
