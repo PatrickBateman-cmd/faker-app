@@ -410,11 +410,12 @@ export function GenerationControls({ onNavigate, pendingTemplate: externalTempla
         const parentNames = new Set(
           (datasets[0]?.group_config?.parent_fields ?? []).map((f) => f.name)
         );
-        const invalid = exactFields
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean)
-          .filter((f) => parentNames.has(f));
+        const parsed = exactFields.split(",").map((s) => s.trim()).filter(Boolean);
+        // The first entry is the join key. In reconciliation mode it's allowed to be a
+        // parent field (see the backend's parent-level join key support); every other
+        // entry must still be a child field.
+        const checkFrom = reconciliationMode ? 1 : 0;
+        const invalid = parsed.slice(checkFrom).filter((f) => parentNames.has(f));
         return invalid.length > 0 ? (
           <p className="text-xs text-[var(--red)]">
             {invalid.map((f) => `"${f}"`).join(", ")} {invalid.length === 1 ? "is a parent field" : "are parent fields"} — move{" "}
