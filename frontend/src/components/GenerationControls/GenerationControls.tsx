@@ -432,6 +432,10 @@ export function GenerationControls({ onNavigate, pendingTemplate: externalTempla
                 ? "No child fields yet — move at least one field from Parent Fields to Child Fields to add a break rule."
                 : "Add at least one field to the first dataset to add a break rule."}
             </p>
+          ) : !exactFields.split(",").map((s) => s.trim()).filter(Boolean)[0] ? (
+            <p className="text-xs text-[var(--red)]">
+              Set a join key in Exact Fields above before adding break rules.
+            </p>
           ) : fieldBreaks.length === 0 ? (
             <p className="text-xs text-[var(--muted)]">No break rules — datasets will match exactly on the fields above.</p>
           ) : null}
@@ -499,7 +503,10 @@ export function GenerationControls({ onNavigate, pendingTemplate: externalTempla
           ))}
           <button
             onClick={addFieldBreak}
-            disabled={eligibleFieldNames(datasets[0]).length === 0}
+            disabled={
+              eligibleFieldNames(datasets[0]).length === 0 ||
+              !exactFields.split(",").map((s) => s.trim()).filter(Boolean)[0]
+            }
             className="self-start text-xs text-[var(--muted)] hover:text-[var(--text)] disabled:opacity-40 disabled:cursor-not-allowed"
           >
             + Add break rule
