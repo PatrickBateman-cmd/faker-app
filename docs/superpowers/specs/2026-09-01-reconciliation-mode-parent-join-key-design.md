@@ -66,6 +66,24 @@ In `engine.py`, built once (mirroring the existing pool-build block at `engine.p
 
 **Ground-truth `join_key_value` resolution** (`grouped.py:135` and `grouped.py:156`, both call sites of `apply_field_breaks`): today this always reads `child_row[join_key_col_idx]`, because the join key has only ever been a child field. It now needs to branch: if the join key lives in `parent_fields` (determined once, before the row loops, alongside the existing `join_key_col_idx` computation), read the value from `parent_row` at its position in `parent_fields` instead of from `child_row`. This is the only place the parent/child distinction leaks into the break-recording path — `field_breaks` themselves keep targeting child-level fields exclusively, unchanged.
 
+Both call sites' existing guard, `if field_breaks and join_key_col_idx is not None:`, also needs updating — `join_key_col_idx` is `None` whenever the join key is parent-level (it's only ever resolved against `child_field_names`), so that guard would never fire for a parent-level join key even when child-level `field_breaks` are configured on other fields. Replace it with `if field_breaks and (join_key_in_parent or join_key_col_idx is not None):`, where `join_key_in_parent` is the same flag computed once before the row loops.
+
+**Group-size determinism.** The existing per-group child-row distribution (`grouped.py:76-85`) draws `num_groups` random weights per dataset, so two datasets with the same `num_groups` will still, with near certainty, split their rows across groups differently (dataset A's group 0 might get 5 child rows while dataset B's group 0 gets 3). The row-level `overlap_pool` (used for any non-join-key `exact_fields`/`field_breaks`, e.g. an `amount` field) is consumed via a flat, monotonically-increasing `row_idx` counter — so with mismatched group sizes, "row 5" in dataset A and "row 5" in dataset B can fall in *different* transaction groups even though the join key itself still matches correctly group-by-group. A child-level break configured alongside a parent-level join key would then not reliably apply within the correct transaction.
+
+Fix: `generate_grouped_dataset` gains a `deterministic_group_sizes: bool = False` parameter, set by `engine.py` to `join_key_is_parent`. When `True`, `group_sizes` is computed with an even split instead of random weights:
+
+```python
+if deterministic_group_sizes:
+    base, remainder = divmod(grouped_rows, num_groups)
+    group_sizes = [base + (1 if i < remainder else 0) for i in range(num_groups)]
+    group_sizes = [max(1, s) for s in group_sizes]
+else:
+    # existing random-weighted logic, unchanged
+    ...
+```
+
+Since parent-level join keys already require identical `num_groups`, identical `rows`, and `split_pct == 100` (so `grouped_rows` is identical too) across every dataset in the batch, this makes `group_sizes` — and therefore every group's row-index boundaries — identical across datasets whenever a parent-level join key is active. `row_idx` then naturally respects group boundaries with no other change needed. When `deterministic_group_sizes` is `False` (every existing call site, and any grouped dataset not using a parent-level join key), behavior is byte-for-byte unchanged. The same pre-existing over-generation edge case the random path already has (when `grouped_rows < num_groups`, `max(1, s)` can push `sum(group_sizes)` above `grouped_rows`) applies equally to the deterministic path — not a new limitation.
+
 ---
 
 ## Frontend (`GenerationControls.tsx`)
@@ -89,7 +107,8 @@ All new checks run inside the existing pre-DuckDB validation block in `engine.py
 ## Testing
 
 - Schema/validation tests: each row of the Error Handling table above gets a test (mismatched parent/child designation, mismatched `num_groups`, `split_pct != 100`, a flat dataset mixed in).
-- Engine test: two grouped datasets, same `num_groups`, join key (`exact_fields[0]`) is a parent field on both, one child-level `field_breaks` entry — assert the join key matches exactly across every child row of corresponding groups in both datasets, and that non-join-key breaks still fire and record correctly (proving the parent/child resolution split didn't regress the existing child-break path).
+- Engine test: two grouped datasets, same `num_groups`, join key (`exact_fields[0]`) is a parent field on both, one child-level `field_breaks` entry — assert the same set of join-key values appears in both datasets (one per group), and that the non-join-key break still fires and records correctly (proving the parent/child resolution split didn't regress the existing child-break path).
+- Determinism test: same two-dataset setup — assert `group_sizes` (inferred by counting child rows per join-key value) is identical between the two datasets, proving the deterministic split actually aligns group boundaries across datasets (not just matching total counts).
 - Regression: existing child-level-join-key tests (from the base reconciliation-mode plan) must continue to pass unchanged — this is purely additive to the validation branch, not a rewrite of it.
 
 ---
