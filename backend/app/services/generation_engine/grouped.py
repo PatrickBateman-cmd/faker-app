@@ -30,6 +30,8 @@ def generate_grouped_dataset(
     join_key_field: str | None = None,
     field_breaks: dict[str, FieldBreakConfig] | None = None,
     ground_truth: list[BreakRecord] | None = None,
+    parent_pool: list[dict] | None = None,
+    deterministic_group_sizes: bool = False,
 ) -> DatasetResult:
     group_cfg = definition.group_config
     assert group_cfg is not None
@@ -69,18 +71,27 @@ def generate_grouped_dataset(
         if join_key_field and join_key_field in child_field_names
         else None
     )
+    parent_field_names = [f.name for f in parent_fields]
+    join_key_in_parent = bool(join_key_field) and join_key_field in parent_field_names
+    parent_join_key_idx = parent_field_names.index(join_key_field) if join_key_in_parent else None
+    has_join_key_value = join_key_in_parent or join_key_col_idx is not None
 
-    # Distribute grouped_rows randomly across num_groups.
+    # Distribute grouped_rows across num_groups.
     # This must be computed before sql_child_columns is sized, since over-generation
     # from the diff-correction/clamping logic below can make sum(group_sizes) > grouped_rows.
     if grouped_enabled:
-        raw_weights = [random.random() for _ in range(num_groups)]
-        total_weight = sum(raw_weights)
-        group_sizes = [max(1, int(grouped_rows * w / total_weight)) for w in raw_weights]
-        diff = grouped_rows - sum(group_sizes)
-        for i in range(abs(diff)):
-            group_sizes[i % num_groups] += 1 if diff > 0 else -1
-        group_sizes = [max(1, s) for s in group_sizes]
+        if deterministic_group_sizes:
+            base, remainder = divmod(grouped_rows, num_groups)
+            group_sizes = [base + (1 if i < remainder else 0) for i in range(num_groups)]
+            group_sizes = [max(1, s) for s in group_sizes]
+        else:
+            raw_weights = [random.random() for _ in range(num_groups)]
+            total_weight = sum(raw_weights)
+            group_sizes = [max(1, int(grouped_rows * w / total_weight)) for w in raw_weights]
+            diff = grouped_rows - sum(group_sizes)
+            for i in range(abs(diff)):
+                group_sizes[i % num_groups] += 1 if diff > 0 else -1
+            group_sizes = [max(1, s) for s in group_sizes]
     else:
         group_sizes = []
 
@@ -110,17 +121,20 @@ def generate_grouped_dataset(
     row_idx = 0
     parent_call_idx = 0
 
-    def _next_parent_row() -> list:
+    def _next_parent_row(group_idx: int | None = None) -> list:
         nonlocal parent_call_idx
         sql_entry = {name: values[parent_call_idx] for name, values in sql_parent_columns.items()}
-        parent_row = generate_row(parent_fields, parent_fakers, fake, pool_entry=sql_entry)
+        pool_entry = (
+            parent_pool[group_idx] if parent_pool and group_idx is not None and group_idx < len(parent_pool) else {}
+        )
+        parent_row = generate_row(parent_fields, parent_fakers, fake, pool_entry={**sql_entry, **pool_entry})
         parent_call_idx += 1
         return parent_row
 
     if grouped_enabled:
         for g_idx in range(num_groups):
             parent_id = str(uuid.uuid4())
-            parent_row = _next_parent_row()
+            parent_row = _next_parent_row(g_idx)
 
             child_count = group_sizes[g_idx]
             for _ in range(child_count):
@@ -130,9 +144,12 @@ def generate_grouped_dataset(
                 child_row = generate_row(
                     child_fields, child_fakers, fake, pool_entry={**sql_entry, **pool_entry}
                 )
-                if field_breaks and join_key_col_idx is not None:
+                if field_breaks and has_join_key_value:
+                    join_key_value = (
+                        parent_row[parent_join_key_idx] if join_key_in_parent else child_row[join_key_col_idx]
+                    )
                     row_breaks = apply_field_breaks(
-                        child_row, child_fields, field_breaks, child_row[join_key_col_idx], dataset_id, fake
+                        child_row, child_fields, field_breaks, join_key_value, dataset_id, fake
                     )
                     if ground_truth is not None:
                         ground_truth.extend(row_breaks)
@@ -151,9 +168,12 @@ def generate_grouped_dataset(
         child_row = generate_row(
             child_fields, child_fakers, fake, pool_entry={**sql_entry, **pool_entry}
         )
-        if field_breaks and join_key_col_idx is not None:
+        if field_breaks and has_join_key_value:
+            join_key_value = (
+                parent_row[parent_join_key_idx] if join_key_in_parent else child_row[join_key_col_idx]
+            )
             row_breaks = apply_field_breaks(
-                child_row, child_fields, field_breaks, child_row[join_key_col_idx], dataset_id, fake
+                child_row, child_fields, field_breaks, join_key_value, dataset_id, fake
             )
             if ground_truth is not None:
                 ground_truth.extend(row_breaks)

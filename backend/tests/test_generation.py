@@ -985,3 +985,65 @@ def test_child_join_key_validation_unchanged(db):
     )
     with pytest.raises(ValueError, match="parent field"):
         generate_datasets(req)
+
+
+def test_parent_join_key_matches_across_groups(db):
+    from app.schemas.generation import FieldBreakConfig
+
+    req = GenerateRequest(
+        datasets=[_grouped_def_with_parent_key("gl"), _grouped_def_with_parent_key("subledger")],
+        homogeneity=100,
+        seed=42,
+        reconciliation_mode=True,
+        exact_fields=["transaction_id", "amount"],
+        field_breaks=[FieldBreakConfig(field_name="amount", break_rate=1.0, break_style="drift", drift_pct=0.1)],
+    )
+    resp = generate_datasets(req)
+
+    tx_ids_0 = {
+        r[0] for r in db.execute(f'SELECT transaction_id FROM "{resp.datasets[0].table_name}"').fetchall()
+    }
+    tx_ids_1 = {
+        r[0] for r in db.execute(f'SELECT transaction_id FROM "{resp.datasets[1].table_name}"').fetchall()
+    }
+    assert tx_ids_0 == tx_ids_1  # same set of transaction_ids in both datasets
+    assert len(tx_ids_0) == 4  # matches num_groups
+
+    assert resp.break_count == 20  # dataset[1]'s 20 child rows all broke on "amount" (break_rate=1.0)
+
+
+def test_parent_join_key_group_sizes_are_deterministic_and_aligned(db):
+    req = GenerateRequest(
+        datasets=[_grouped_def_with_parent_key("gl"), _grouped_def_with_parent_key("subledger")],
+        homogeneity=100,
+        seed=42,
+        reconciliation_mode=True,
+        exact_fields=["transaction_id"],
+    )
+    resp = generate_datasets(req)
+
+    def _counts_by_tx(table_name: str) -> dict:
+        rows = db.execute(f'SELECT transaction_id FROM "{table_name}"').fetchall()
+        counts: dict = {}
+        for (tx,) in rows:
+            counts[tx] = counts.get(tx, 0) + 1
+        return counts
+
+    counts_0 = _counts_by_tx(resp.datasets[0].table_name)
+    counts_1 = _counts_by_tx(resp.datasets[1].table_name)
+    assert counts_0 == counts_1  # identical child-row count per transaction_id in both datasets
+
+
+def test_child_join_key_group_sizes_stay_random(db):
+    # Regression: a plain child-level join key (the existing, already-shipped case) must NOT
+    # switch to deterministic group sizing — this flag is scoped strictly to parent-level keys.
+    req = GenerateRequest(
+        datasets=[_grouped_def_with_parent_key("gl"), _grouped_def_with_parent_key("subledger")],
+        homogeneity=100,
+        seed=42,
+        overlap_ratio=1.0,
+        exact_fields=["amount"],  # child-level join key, no reconciliation_mode
+    )
+    resp = generate_datasets(req)
+    assert resp.datasets[0].row_count == 20
+    assert resp.datasets[1].row_count == 20

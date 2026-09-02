@@ -9,7 +9,7 @@ from app.schemas.generation import DatasetResult, FieldBreakConfig, GenerateRequ
 from app.services.generation_engine.breaks import BreakRecord
 from app.services.generation_engine.flat import generate_dataset
 from app.services.generation_engine.grouped import generate_grouped_dataset
-from app.services.generation_engine.overlap import build_overlap_pool, effective_fields
+from app.services.generation_engine.overlap import build_overlap_pool, build_parent_pool, effective_fields
 from app.services.generation_engine.persistence import persist_recon_breaks
 
 _NUMERIC_TYPES = {"integer", "int", "float", "decimal", "number"}
@@ -102,11 +102,20 @@ def generate_datasets(request: GenerateRequest) -> GenerateResponse:
     # Build the global overlap pool once
     overlap_pool: list[dict] = []
     pool_size = 0
+    parent_pool: list[dict] = []
+    row_exact_field_names = exact_field_names
+    if join_key_is_parent:
+        row_exact_field_names = exact_field_names - {join_key_field}
+        first_group_cfg = request.datasets[0].group_config
+        assert first_group_cfg is not None
+        parent_pool = build_parent_pool(
+            main_fake, first_group_cfg.parent_fields, join_key_field, first_group_cfg.num_groups
+        )
     if overlap_ratio > 0 and request.datasets:
         pool_size = int(min(d.rows for d in request.datasets) * overlap_ratio)
         if pool_size > 0:
             first_fields = effective_fields(request.datasets[0])
-            overlap_pool = build_overlap_pool(main_fake, first_fields, exact_field_names, pool_size)
+            overlap_pool = build_overlap_pool(main_fake, first_fields, row_exact_field_names, pool_size)
 
     ground_truth: list[BreakRecord] = []
     dataset_results: list[DatasetResult] = []
@@ -124,6 +133,8 @@ def generate_datasets(request: GenerateRequest) -> GenerateResponse:
                 join_key_field=join_key_field,
                 field_breaks=ds_field_breaks,
                 ground_truth=ground_truth,
+                parent_pool=parent_pool,
+                deterministic_group_sizes=join_key_is_parent,
             )
         else:
             dr = generate_dataset(
