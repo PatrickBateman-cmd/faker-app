@@ -90,6 +90,7 @@ function emptyField(): FieldDef {
 
 export function GenerationControls({ onNavigate, pendingTemplate: externalTemplate }: { onNavigate?: (page: string) => void; pendingTemplate?: string | null }) {
   const [datasetCount, setDatasetCount] = useState(1);
+  const [mode, setMode] = useState<"flat" | "grouped">("flat");
   const [datasets, setDatasets] = useState<DatasetDefinition[]>([emptyDataset("Dataset 1")]);
   const [homogeneity, setHomogeneity] = useState(50);
   const [seed, setSeed] = useState("");
@@ -97,7 +98,6 @@ export function GenerationControls({ onNavigate, pendingTemplate: externalTempla
   const [exactFields, setExactFields] = useState("");
   const [reconciliationMode, setReconciliationMode] = useState(false);
   const [fieldBreaks, setFieldBreaks] = useState<FieldBreakConfig[]>([]);
-  const [mode, setMode] = useState<"flat" | "grouped">("flat");
   const [results, setResults] = useState<DatasetResult[] | null>(null);
   const [overlapPoolSize, setOverlapPoolSize] = useState<number>(0);
   const [resultExactFields, setResultExactFields] = useState<string[]>([]);
