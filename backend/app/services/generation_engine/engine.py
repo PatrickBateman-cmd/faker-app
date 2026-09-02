@@ -25,6 +25,7 @@ def generate_datasets(request: GenerateRequest) -> GenerateResponse:
     exact_field_names = set(request.exact_fields)
 
     join_key_field: str | None = None
+    join_key_is_parent = False
     field_breaks_by_name: dict[str, FieldBreakConfig] = {}
     if request.reconciliation_mode:
         if len(request.datasets) < 2:
@@ -35,6 +36,30 @@ def generate_datasets(request: GenerateRequest) -> GenerateResponse:
             raise ValueError("reconciliation_mode requires all datasets to declare the same number of rows")
         overlap_ratio = 1.0
         join_key_field = request.exact_fields[0]
+
+        join_key_is_parent = any(
+            ds.group_config and join_key_field in {f.name for f in ds.group_config.parent_fields}
+            for ds in request.datasets
+        )
+        if join_key_is_parent:
+            for ds in request.datasets:
+                parent_names = set() if not ds.group_config else {f.name for f in ds.group_config.parent_fields}
+                if not ds.group_config or join_key_field not in parent_names:
+                    raise ValueError(
+                        f"reconciliation_mode: parent-level join key '{join_key_field}' requires "
+                        f"every dataset to be grouped with '{join_key_field}' as a parent field"
+                    )
+            if len({ds.group_config.num_groups for ds in request.datasets}) > 1:
+                raise ValueError(
+                    "reconciliation_mode: parent-level join key requires all grouped datasets "
+                    "to declare the same num_groups"
+                )
+            if any(ds.group_config.split_pct != 100 for ds in request.datasets):
+                raise ValueError(
+                    "reconciliation_mode: parent-level join key requires split_pct=100 "
+                    "on every grouped dataset"
+                )
+
         for fb in request.field_breaks:
             if fb.field_name not in exact_field_names:
                 raise ValueError(f"field_breaks field '{fb.field_name}' must be listed in exact_fields")
@@ -60,7 +85,7 @@ def generate_datasets(request: GenerateRequest) -> GenerateResponse:
             if ds.group_config:
                 parent_names = {f.name for f in ds.group_config.parent_fields}
                 for ef in exact_field_names:
-                    if ef in parent_names:
+                    if ef in parent_names and not (join_key_is_parent and ef == join_key_field):
                         raise ValueError(
                             f"exact field '{ef}' is a parent field in grouped dataset '{ds.name}'; "
                             "overlap only supports child-level fields for grouped datasets"

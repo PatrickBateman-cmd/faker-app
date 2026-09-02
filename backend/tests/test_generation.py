@@ -870,3 +870,118 @@ def test_reconciliation_mode_exact_fields_response_preserves_request_order(db):
     # exact_fields[0] is the join key by contract; the response must echo the exact
     # request order, not a Python set's arbitrary iteration order.
     assert resp.exact_fields == ordered_exact_fields
+
+
+def _grouped_def_with_parent_key(name: str, num_groups: int = 4, split_pct: float = 100, rows: int = 20) -> DatasetDefinition:
+    return DatasetDefinition(
+        name=name,
+        rows=rows,
+        group_config=GroupConfig(
+            num_groups=num_groups,
+            split_pct=split_pct,
+            parent_fields=[FieldDefinition(name="transaction_id", generator="uuid4", type="string")],
+            child_fields=[
+                FieldDefinition(
+                    name="amount", generator="random_int", type="integer",
+                    constraint=ConstraintConfig(min=1000, max=9999),
+                ),
+            ],
+        ),
+    )
+
+
+def test_parent_join_key_rejects_flat_dataset_in_batch(db):
+    import pytest
+
+    flat_def = DatasetDefinition(
+        name="flat_ds", rows=20,
+        fields=[FieldDefinition(name="transaction_id", generator="uuid4", type="string")],
+    )
+    req = GenerateRequest(
+        datasets=[_grouped_def_with_parent_key("gl"), flat_def],
+        homogeneity=100,
+        seed=42,
+        reconciliation_mode=True,
+        exact_fields=["transaction_id"],
+    )
+    with pytest.raises(ValueError, match="requires every dataset to be grouped"):
+        generate_datasets(req)
+
+
+def test_parent_join_key_rejects_child_designation_on_other_dataset(db):
+    import pytest
+
+    mismatched_def = DatasetDefinition(
+        name="subledger", rows=20,
+        group_config=GroupConfig(
+            num_groups=4,
+            split_pct=100,
+            parent_fields=[FieldDefinition(name="other_parent", generator="word", type="string")],
+            child_fields=[
+                FieldDefinition(name="transaction_id", generator="uuid4", type="string"),
+                FieldDefinition(
+                    name="amount", generator="random_int", type="integer",
+                    constraint=ConstraintConfig(min=1000, max=9999),
+                ),
+            ],
+        ),
+    )
+    req = GenerateRequest(
+        datasets=[_grouped_def_with_parent_key("gl"), mismatched_def],
+        homogeneity=100,
+        seed=42,
+        reconciliation_mode=True,
+        exact_fields=["transaction_id"],
+    )
+    with pytest.raises(ValueError, match="requires every dataset to be grouped"):
+        generate_datasets(req)
+
+
+def test_parent_join_key_rejects_num_groups_mismatch(db):
+    import pytest
+
+    req = GenerateRequest(
+        datasets=[
+            _grouped_def_with_parent_key("gl", num_groups=4),
+            _grouped_def_with_parent_key("subledger", num_groups=5),
+        ],
+        homogeneity=100,
+        seed=42,
+        reconciliation_mode=True,
+        exact_fields=["transaction_id"],
+    )
+    with pytest.raises(ValueError, match="same num_groups"):
+        generate_datasets(req)
+
+
+def test_parent_join_key_rejects_split_pct_not_100(db):
+    import pytest
+
+    req = GenerateRequest(
+        datasets=[
+            _grouped_def_with_parent_key("gl", split_pct=100),
+            _grouped_def_with_parent_key("subledger", split_pct=80),
+        ],
+        homogeneity=100,
+        seed=42,
+        reconciliation_mode=True,
+        exact_fields=["transaction_id"],
+    )
+    with pytest.raises(ValueError, match="split_pct=100"):
+        generate_datasets(req)
+
+
+def test_child_join_key_validation_unchanged(db):
+    # Regression: a plain child-level join key (today's only prior case) must still be rejected
+    # if it's actually a parent field — the carve-out must not accidentally widen this check.
+    import pytest
+
+    req = GenerateRequest(
+        datasets=[_grouped_def_with_parent_key("gl"), _grouped_def_with_parent_key("subledger")],
+        homogeneity=100,
+        seed=42,
+        reconciliation_mode=True,
+        exact_fields=["amount", "transaction_id"],  # "amount" (child) is the join key here, "transaction_id" (parent) is not
+    )
+    with pytest.raises(ValueError, match="parent field"):
+        generate_datasets(req)
