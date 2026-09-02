@@ -120,11 +120,27 @@ export function GenerationControls({ onNavigate, pendingTemplate: externalTempla
   });
 
   function emptyDataset(name?: string): DatasetDefinition {
-    return {
+    const base: DatasetDefinition = {
       name: name || "",
       rows: 100,
       fields: [emptyField()],
     };
+    // Match the current Flat/Parent-Child mode — otherwise a dataset added via the
+    // "Datasets: N" count buttons while already in grouped mode ends up with no
+    // group_config, so it silently generates flat and neither the grouped-mode field
+    // editors nor a loaded template are ever shown for it.
+    if (mode === "grouped") {
+      return {
+        ...base,
+        group_config: {
+          num_groups: 4,
+          split_pct: 100,
+          parent_fields: [emptyField()],
+          child_fields: [emptyField()],
+        },
+      };
+    }
+    return base;
   }
 
   function switchMode(newMode: "flat" | "grouped") {
