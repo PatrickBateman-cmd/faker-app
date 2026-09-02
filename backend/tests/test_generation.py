@@ -1034,6 +1034,72 @@ def test_parent_join_key_group_sizes_are_deterministic_and_aligned(db):
     assert counts_0 == counts_1  # identical child-row count per transaction_id in both datasets
 
 
+def _grouped_def_with_second_parent_field(name: str, num_groups: int = 4, split_pct: float = 100, rows: int = 20) -> DatasetDefinition:
+    # "region" is declared BEFORE "transaction_id" in parent_fields, so the join key
+    # sits at parent-field index 1, not 0 — this forces grouped.py's
+    # parent_field_names.index(join_key_field) resolution to actually matter.
+    return DatasetDefinition(
+        name=name,
+        rows=rows,
+        group_config=GroupConfig(
+            num_groups=num_groups,
+            split_pct=split_pct,
+            parent_fields=[
+                FieldDefinition(name="region", generator="country_code", type="string"),
+                FieldDefinition(name="transaction_id", generator="uuid4", type="string"),
+            ],
+            child_fields=[
+                FieldDefinition(
+                    name="amount", generator="random_int", type="integer",
+                    constraint=ConstraintConfig(min=1000, max=9999),
+                ),
+            ],
+        ),
+    )
+
+
+def test_parent_join_key_ground_truth_records_parent_value_not_child_value(db):
+    # Regression: metadata_recon_breaks.join_key_value must be read from the PARENT row
+    # (via parent_field_names.index(join_key_field)) when the join key is a parent-level
+    # field. Using a second, earlier parent field ("region") ensures the join key is not
+    # trivially at index 0, so an indexing bug in grouped.py would be caught here.
+    from collections import Counter
+
+    from app.schemas.generation import FieldBreakConfig
+
+    req = GenerateRequest(
+        datasets=[
+            _grouped_def_with_second_parent_field("gl"),
+            _grouped_def_with_second_parent_field("subledger"),
+        ],
+        homogeneity=100,
+        seed=42,
+        reconciliation_mode=True,
+        exact_fields=["transaction_id", "amount"],
+        field_breaks=[FieldBreakConfig(field_name="amount", break_rate=1.0, break_style="drift", drift_pct=0.1)],
+    )
+    resp = generate_datasets(req)
+
+    breaking_dataset_id = resp.datasets[1].dataset_id
+    gt_rows = db.execute(
+        "SELECT join_key_value, true_value FROM metadata_recon_breaks WHERE run_id = ? AND dataset_id = ?",
+        [resp.run_id, breaking_dataset_id],
+    ).fetchall()
+    assert len(gt_rows) == 20  # dataset[1]'s 20 child rows all broke on "amount" (break_rate=1.0)
+    gt_pairs = Counter((str(jk), str(tv)) for jk, tv in gt_rows)
+
+    authoritative_rows = db.execute(
+        f'SELECT transaction_id, amount FROM "{resp.datasets[0].table_name}"'
+    ).fetchall()
+    authoritative_pairs = Counter((str(tx), str(amount)) for tx, amount in authoritative_rows)
+
+    # Every recorded (join_key_value, true_value) pair must correspond exactly to a
+    # (transaction_id, amount) pair on the authoritative dataset — proving join_key_value
+    # is genuinely the parent's transaction_id, not e.g. the parent's "region" value
+    # (which an off-by-one index bug would have produced instead).
+    assert gt_pairs == authoritative_pairs
+
+
 def test_child_join_key_group_sizes_stay_random(db):
     # Regression: a plain child-level join key (the existing, already-shipped case) must NOT
     # switch to deterministic group sizing — this flag is scoped strictly to parent-level keys.

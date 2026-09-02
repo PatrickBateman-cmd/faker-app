@@ -272,7 +272,7 @@ export function GenerationControls({ onNavigate, pendingTemplate: externalTempla
     const candidate = eligibleFieldNames(datasets[0])
       .find((f) => f !== joinKey && !fieldBreaks.some((fb) => fb.field_name === f));
     if (candidate && !exactFields.split(",").map((s) => s.trim()).includes(candidate)) {
-      setExactFields((prev) => (prev.trim() ? `${prev}, ${candidate}` : candidate));
+      setExactFields((prev) => (prev.trim() ? `${prev}, ${candidate}` : prev));
     }
     setFieldBreaks((prev) => [...prev, emptyFieldBreak(candidate ?? "")]);
   }
@@ -399,7 +399,9 @@ export function GenerationControls({ onNavigate, pendingTemplate: externalTempla
             />
             {mode === "grouped" && (
               <span className="text-xs text-[var(--muted)]">
-                Grouped datasets: must be a child field, not a parent field.
+                {reconciliationMode
+                  ? "Grouped datasets: the join key (first entry) may be a parent field; every other field must be a child field."
+                  : "Grouped datasets: must be a child field, not a parent field."}
               </span>
             )}
           </div>
@@ -448,7 +450,7 @@ export function GenerationControls({ onNavigate, pendingTemplate: externalTempla
                   const name = e.target.value;
                   updateFieldBreak(i, (f) => ({ ...f, field_name: name }));
                   if (name && !exactFields.split(",").map((s) => s.trim()).includes(name)) {
-                    setExactFields((prev) => (prev.trim() ? `${prev}, ${name}` : name));
+                    setExactFields((prev) => (prev.trim() ? `${prev}, ${name}` : prev));
                   }
                 }}
                 className="w-32 bg-[var(--elevated)] border border-[var(--border)] rounded px-1.5 py-1 text-[var(--text)]"
