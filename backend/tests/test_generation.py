@@ -605,3 +605,511 @@ def test_grouped_dataset_num_groups_exceeds_grouped_rows_does_not_crash(db):
     assert len(rows) >= 5  # at least the requested rows exist; over-generation (pre-existing, out of scope) may add more
     for (qty,) in rows:
         assert 1 <= qty <= 1000
+
+
+def test_flat_field_breaks_applied_to_non_authoritative_dataset(db):
+    from app.schemas.generation import FieldBreakConfig
+
+    shared_fields = [
+        FieldDefinition(name="trade_id", generator="uuid4", type="string"),
+        FieldDefinition(
+            name="amount", generator="random_int", type="integer",
+            constraint=ConstraintConfig(min=10000, max=99999),
+        ),
+    ]
+    req = GenerateRequest(
+        datasets=[
+            DatasetDefinition(name="gl", rows=20, fields=list(shared_fields)),
+            DatasetDefinition(name="subledger", rows=20, fields=list(shared_fields)),
+        ],
+        homogeneity=100,
+        seed=42,
+        overlap_ratio=1.0,
+        exact_fields=["trade_id", "amount"],
+        reconciliation_mode=True,
+        field_breaks=[
+            FieldBreakConfig(field_name="amount", break_rate=1.0, break_style="drift", drift_pct=0.1)
+        ],
+    )
+    resp = generate_datasets(req)
+
+    trade_ids_0 = [r[0] for r in db.execute(f'SELECT trade_id FROM "{resp.datasets[0].table_name}"').fetchall()]
+    trade_ids_1 = [r[0] for r in db.execute(f'SELECT trade_id FROM "{resp.datasets[1].table_name}"').fetchall()]
+    assert trade_ids_0 == trade_ids_1  # join key never breaks
+
+    amounts_0 = [r[0] for r in db.execute(f'SELECT amount FROM "{resp.datasets[0].table_name}"').fetchall()]
+    amounts_1 = [r[0] for r in db.execute(f'SELECT amount FROM "{resp.datasets[1].table_name}"').fetchall()]
+    for true_v, broken_v in zip(amounts_0, amounts_1, strict=True):
+        assert abs(broken_v - true_v) <= true_v * 0.1 + 1
+
+    assert resp.break_count == 20  # one non-authoritative dataset, break_rate=1.0, 20 rows
+    gt_rows = db.execute("SELECT COUNT(*) FROM metadata_recon_breaks WHERE run_id = ?", [resp.run_id]).fetchone()[0]
+    assert gt_rows == 20
+
+
+def test_flat_field_breaks_zero_rate_no_ground_truth(db):
+    from app.schemas.generation import FieldBreakConfig
+
+    shared_fields = [
+        FieldDefinition(name="trade_id", generator="uuid4", type="string"),
+        FieldDefinition(name="amount", generator="random_int", type="integer"),
+    ]
+    req = GenerateRequest(
+        datasets=[
+            DatasetDefinition(name="gl", rows=10, fields=list(shared_fields)),
+            DatasetDefinition(name="subledger", rows=10, fields=list(shared_fields)),
+        ],
+        homogeneity=100,
+        seed=42,
+        exact_fields=["trade_id", "amount"],
+        reconciliation_mode=True,
+        field_breaks=[FieldBreakConfig(field_name="amount", break_rate=0.0)],
+    )
+    resp = generate_datasets(req)
+    amounts_0 = [r[0] for r in db.execute(f'SELECT amount FROM "{resp.datasets[0].table_name}"').fetchall()]
+    amounts_1 = [r[0] for r in db.execute(f'SELECT amount FROM "{resp.datasets[1].table_name}"').fetchall()]
+    assert amounts_0 == amounts_1
+    assert resp.break_count == 0
+
+
+def test_grouped_field_breaks_applied_to_child_field(db):
+    from app.schemas.generation import FieldBreakConfig
+
+    def _grouped_def(name: str) -> DatasetDefinition:
+        return DatasetDefinition(
+            name=name,
+            rows=10,
+            group_config=GroupConfig(
+                num_groups=2,
+                split_pct=100,
+                parent_fields=[FieldDefinition(name="trade_id", generator="uuid4", type="string")],
+                child_fields=[
+                    FieldDefinition(name="counterparty_id", generator="uuid4", type="string"),
+                    FieldDefinition(
+                        name="qty", generator="random_int", type="integer",
+                        constraint=ConstraintConfig(min=1000, max=9999),
+                    ),
+                ],
+            ),
+        )
+
+    req = GenerateRequest(
+        datasets=[_grouped_def("g1"), _grouped_def("g2")],
+        homogeneity=100,
+        seed=42,
+        overlap_ratio=1.0,
+        exact_fields=["counterparty_id", "qty"],
+        reconciliation_mode=True,
+        field_breaks=[FieldBreakConfig(field_name="qty", break_rate=1.0, break_style="drift", drift_pct=0.1)],
+    )
+    resp = generate_datasets(req)
+
+    cp_0 = [r[0] for r in db.execute(f'SELECT counterparty_id FROM "{resp.datasets[0].table_name}"').fetchall()]
+    cp_1 = [r[0] for r in db.execute(f'SELECT counterparty_id FROM "{resp.datasets[1].table_name}"').fetchall()]
+    assert cp_0 == cp_1  # join key never breaks
+
+    qty_0 = [r[0] for r in db.execute(f'SELECT qty FROM "{resp.datasets[0].table_name}"').fetchall()]
+    qty_1 = [r[0] for r in db.execute(f'SELECT qty FROM "{resp.datasets[1].table_name}"').fetchall()]
+    for true_v, broken_v in zip(qty_0, qty_1, strict=True):
+        assert abs(broken_v - true_v) <= true_v * 0.1 + 1
+
+    assert resp.break_count == 10
+
+
+def test_reconciliation_mode_requires_two_datasets(db):
+    import pytest
+    from app.schemas.generation import FieldBreakConfig
+
+    req = GenerateRequest(
+        datasets=[DatasetDefinition(name="ds1", rows=5, fields=[FieldDefinition(name="trade_id", generator="uuid4", type="string")])],
+        reconciliation_mode=True,
+        exact_fields=["trade_id"],
+    )
+    with pytest.raises(ValueError, match="at least 2 datasets"):
+        generate_datasets(req)
+
+
+def test_reconciliation_mode_requires_exact_fields(db):
+    import pytest
+
+    req = GenerateRequest(
+        datasets=[
+            DatasetDefinition(name="ds1", rows=5, fields=[FieldDefinition(name="trade_id", generator="uuid4", type="string")]),
+            DatasetDefinition(name="ds2", rows=5, fields=[FieldDefinition(name="trade_id", generator="uuid4", type="string")]),
+        ],
+        reconciliation_mode=True,
+    )
+    with pytest.raises(ValueError, match="requires exact_fields"):
+        generate_datasets(req)
+
+
+def test_field_breaks_without_reconciliation_mode_rejected(db):
+    import pytest
+    from app.schemas.generation import FieldBreakConfig
+
+    shared_fields = [FieldDefinition(name="trade_id", generator="uuid4", type="string")]
+    req = GenerateRequest(
+        datasets=[
+            DatasetDefinition(name="ds1", rows=5, fields=list(shared_fields)),
+            DatasetDefinition(name="ds2", rows=5, fields=list(shared_fields)),
+        ],
+        field_breaks=[FieldBreakConfig(field_name="trade_id", break_rate=0.1)],
+    )
+    with pytest.raises(ValueError, match="requires reconciliation_mode"):
+        generate_datasets(req)
+
+
+def test_field_break_on_join_key_rejected(db):
+    import pytest
+    from app.schemas.generation import FieldBreakConfig
+
+    shared_fields = [FieldDefinition(name="trade_id", generator="uuid4", type="string")]
+    req = GenerateRequest(
+        datasets=[
+            DatasetDefinition(name="ds1", rows=5, fields=list(shared_fields)),
+            DatasetDefinition(name="ds2", rows=5, fields=list(shared_fields)),
+        ],
+        reconciliation_mode=True,
+        exact_fields=["trade_id"],
+        field_breaks=[FieldBreakConfig(field_name="trade_id", break_rate=0.1)],
+    )
+    with pytest.raises(ValueError, match="cannot target the join key"):
+        generate_datasets(req)
+
+
+def test_field_break_not_in_exact_fields_rejected(db):
+    import pytest
+    from app.schemas.generation import FieldBreakConfig
+
+    shared_fields = [
+        FieldDefinition(name="trade_id", generator="uuid4", type="string"),
+        FieldDefinition(name="notes", generator="text", type="string"),
+    ]
+    req = GenerateRequest(
+        datasets=[
+            DatasetDefinition(name="ds1", rows=5, fields=list(shared_fields)),
+            DatasetDefinition(name="ds2", rows=5, fields=list(shared_fields)),
+        ],
+        reconciliation_mode=True,
+        exact_fields=["trade_id"],
+        field_breaks=[FieldBreakConfig(field_name="notes", break_rate=0.1)],
+    )
+    with pytest.raises(ValueError, match="must be listed in exact_fields"):
+        generate_datasets(req)
+
+
+def test_field_break_drift_on_non_numeric_field_rejected(db):
+    import pytest
+    from app.schemas.generation import FieldBreakConfig
+
+    shared_fields = [
+        FieldDefinition(name="trade_id", generator="uuid4", type="string"),
+        FieldDefinition(name="status", generator="random_element", type="string"),
+    ]
+    req = GenerateRequest(
+        datasets=[
+            DatasetDefinition(name="ds1", rows=5, fields=list(shared_fields)),
+            DatasetDefinition(name="ds2", rows=5, fields=list(shared_fields)),
+        ],
+        reconciliation_mode=True,
+        exact_fields=["trade_id", "status"],
+        field_breaks=[FieldBreakConfig(field_name="status", break_rate=0.1, break_style="drift")],
+    )
+    with pytest.raises(ValueError, match="not numeric"):
+        generate_datasets(req)
+
+
+def test_reconciliation_mode_forces_overlap_ratio_to_one(db):
+    shared_fields = [FieldDefinition(name="trade_id", generator="uuid4", type="string")]
+    req = GenerateRequest(
+        datasets=[
+            DatasetDefinition(name="ds1", rows=8, fields=list(shared_fields)),
+            DatasetDefinition(name="ds2", rows=8, fields=list(shared_fields)),
+        ],
+        reconciliation_mode=True,
+        exact_fields=["trade_id"],
+        overlap_ratio=0.0,  # deliberately not 1.0 — must be forced
+    )
+    resp = generate_datasets(req)
+    assert resp.overlap_pool_size == 8
+
+
+def test_reconciliation_mode_requires_equal_row_counts(db):
+    import pytest
+
+    shared_fields = [FieldDefinition(name="trade_id", generator="uuid4", type="string")]
+    req = GenerateRequest(
+        datasets=[
+            DatasetDefinition(name="ds1", rows=8, fields=list(shared_fields)),
+            DatasetDefinition(name="ds2", rows=10, fields=list(shared_fields)),
+        ],
+        reconciliation_mode=True,
+        exact_fields=["trade_id"],
+    )
+    with pytest.raises(ValueError, match="same number of rows"):
+        generate_datasets(req)
+
+
+def test_reconciliation_mode_exact_fields_response_preserves_request_order(db):
+    shared_fields = [
+        FieldDefinition(name="trade_id", generator="uuid4", type="string"),
+        FieldDefinition(name="amount", generator="random_int", type="integer"),
+        FieldDefinition(name="status", generator="random_element", type="string"),
+        FieldDefinition(name="notes", generator="text", type="string"),
+    ]
+    ordered_exact_fields = ["notes", "status", "trade_id", "amount"]
+    req = GenerateRequest(
+        datasets=[
+            DatasetDefinition(name="ds1", rows=5, fields=list(shared_fields)),
+            DatasetDefinition(name="ds2", rows=5, fields=list(shared_fields)),
+        ],
+        reconciliation_mode=True,
+        exact_fields=ordered_exact_fields,
+    )
+    resp = generate_datasets(req)
+    # exact_fields[0] is the join key by contract; the response must echo the exact
+    # request order, not a Python set's arbitrary iteration order.
+    assert resp.exact_fields == ordered_exact_fields
+
+
+def _grouped_def_with_parent_key(name: str, num_groups: int = 4, split_pct: float = 100, rows: int = 20) -> DatasetDefinition:
+    return DatasetDefinition(
+        name=name,
+        rows=rows,
+        group_config=GroupConfig(
+            num_groups=num_groups,
+            split_pct=split_pct,
+            parent_fields=[FieldDefinition(name="transaction_id", generator="uuid4", type="string")],
+            child_fields=[
+                FieldDefinition(
+                    name="amount", generator="random_int", type="integer",
+                    constraint=ConstraintConfig(min=1000, max=9999),
+                ),
+            ],
+        ),
+    )
+
+
+def test_parent_join_key_rejects_flat_dataset_in_batch(db):
+    import pytest
+
+    flat_def = DatasetDefinition(
+        name="flat_ds", rows=20,
+        fields=[FieldDefinition(name="transaction_id", generator="uuid4", type="string")],
+    )
+    req = GenerateRequest(
+        datasets=[_grouped_def_with_parent_key("gl"), flat_def],
+        homogeneity=100,
+        seed=42,
+        reconciliation_mode=True,
+        exact_fields=["transaction_id"],
+    )
+    with pytest.raises(ValueError, match="requires every dataset to be grouped"):
+        generate_datasets(req)
+
+
+def test_parent_join_key_rejects_child_designation_on_other_dataset(db):
+    import pytest
+
+    mismatched_def = DatasetDefinition(
+        name="subledger", rows=20,
+        group_config=GroupConfig(
+            num_groups=4,
+            split_pct=100,
+            parent_fields=[FieldDefinition(name="other_parent", generator="word", type="string")],
+            child_fields=[
+                FieldDefinition(name="transaction_id", generator="uuid4", type="string"),
+                FieldDefinition(
+                    name="amount", generator="random_int", type="integer",
+                    constraint=ConstraintConfig(min=1000, max=9999),
+                ),
+            ],
+        ),
+    )
+    req = GenerateRequest(
+        datasets=[_grouped_def_with_parent_key("gl"), mismatched_def],
+        homogeneity=100,
+        seed=42,
+        reconciliation_mode=True,
+        exact_fields=["transaction_id"],
+    )
+    with pytest.raises(ValueError, match="requires every dataset to be grouped"):
+        generate_datasets(req)
+
+
+def test_parent_join_key_rejects_num_groups_mismatch(db):
+    import pytest
+
+    req = GenerateRequest(
+        datasets=[
+            _grouped_def_with_parent_key("gl", num_groups=4),
+            _grouped_def_with_parent_key("subledger", num_groups=5),
+        ],
+        homogeneity=100,
+        seed=42,
+        reconciliation_mode=True,
+        exact_fields=["transaction_id"],
+    )
+    with pytest.raises(ValueError, match="same num_groups"):
+        generate_datasets(req)
+
+
+def test_parent_join_key_rejects_split_pct_not_100(db):
+    import pytest
+
+    req = GenerateRequest(
+        datasets=[
+            _grouped_def_with_parent_key("gl", split_pct=100),
+            _grouped_def_with_parent_key("subledger", split_pct=80),
+        ],
+        homogeneity=100,
+        seed=42,
+        reconciliation_mode=True,
+        exact_fields=["transaction_id"],
+    )
+    with pytest.raises(ValueError, match="split_pct=100"):
+        generate_datasets(req)
+
+
+def test_child_join_key_validation_unchanged(db):
+    # Regression: a plain child-level join key (today's only prior case) must still be rejected
+    # if it's actually a parent field — the carve-out must not accidentally widen this check.
+    import pytest
+
+    req = GenerateRequest(
+        datasets=[_grouped_def_with_parent_key("gl"), _grouped_def_with_parent_key("subledger")],
+        homogeneity=100,
+        seed=42,
+        reconciliation_mode=True,
+        exact_fields=["amount", "transaction_id"],  # "amount" (child) is the join key here, "transaction_id" (parent) is not
+    )
+    with pytest.raises(ValueError, match="parent field"):
+        generate_datasets(req)
+
+
+def test_parent_join_key_matches_across_groups(db):
+    from app.schemas.generation import FieldBreakConfig
+
+    req = GenerateRequest(
+        datasets=[_grouped_def_with_parent_key("gl"), _grouped_def_with_parent_key("subledger")],
+        homogeneity=100,
+        seed=42,
+        reconciliation_mode=True,
+        exact_fields=["transaction_id", "amount"],
+        field_breaks=[FieldBreakConfig(field_name="amount", break_rate=1.0, break_style="drift", drift_pct=0.1)],
+    )
+    resp = generate_datasets(req)
+
+    tx_ids_0 = {
+        r[0] for r in db.execute(f'SELECT transaction_id FROM "{resp.datasets[0].table_name}"').fetchall()
+    }
+    tx_ids_1 = {
+        r[0] for r in db.execute(f'SELECT transaction_id FROM "{resp.datasets[1].table_name}"').fetchall()
+    }
+    assert tx_ids_0 == tx_ids_1  # same set of transaction_ids in both datasets
+    assert len(tx_ids_0) == 4  # matches num_groups
+
+    assert resp.break_count == 20  # dataset[1]'s 20 child rows all broke on "amount" (break_rate=1.0)
+
+
+def test_parent_join_key_group_sizes_are_deterministic_and_aligned(db):
+    req = GenerateRequest(
+        datasets=[_grouped_def_with_parent_key("gl"), _grouped_def_with_parent_key("subledger")],
+        homogeneity=100,
+        seed=42,
+        reconciliation_mode=True,
+        exact_fields=["transaction_id"],
+    )
+    resp = generate_datasets(req)
+
+    def _counts_by_tx(table_name: str) -> dict:
+        rows = db.execute(f'SELECT transaction_id FROM "{table_name}"').fetchall()
+        counts: dict = {}
+        for (tx,) in rows:
+            counts[tx] = counts.get(tx, 0) + 1
+        return counts
+
+    counts_0 = _counts_by_tx(resp.datasets[0].table_name)
+    counts_1 = _counts_by_tx(resp.datasets[1].table_name)
+    assert counts_0 == counts_1  # identical child-row count per transaction_id in both datasets
+
+
+def _grouped_def_with_second_parent_field(name: str, num_groups: int = 4, split_pct: float = 100, rows: int = 20) -> DatasetDefinition:
+    # "region" is declared BEFORE "transaction_id" in parent_fields, so the join key
+    # sits at parent-field index 1, not 0 — this forces grouped.py's
+    # parent_field_names.index(join_key_field) resolution to actually matter.
+    return DatasetDefinition(
+        name=name,
+        rows=rows,
+        group_config=GroupConfig(
+            num_groups=num_groups,
+            split_pct=split_pct,
+            parent_fields=[
+                FieldDefinition(name="region", generator="country_code", type="string"),
+                FieldDefinition(name="transaction_id", generator="uuid4", type="string"),
+            ],
+            child_fields=[
+                FieldDefinition(
+                    name="amount", generator="random_int", type="integer",
+                    constraint=ConstraintConfig(min=1000, max=9999),
+                ),
+            ],
+        ),
+    )
+
+
+def test_parent_join_key_ground_truth_records_parent_value_not_child_value(db):
+    # Regression: metadata_recon_breaks.join_key_value must be read from the PARENT row
+    # (via parent_field_names.index(join_key_field)) when the join key is a parent-level
+    # field. Using a second, earlier parent field ("region") ensures the join key is not
+    # trivially at index 0, so an indexing bug in grouped.py would be caught here.
+    from collections import Counter
+
+    from app.schemas.generation import FieldBreakConfig
+
+    req = GenerateRequest(
+        datasets=[
+            _grouped_def_with_second_parent_field("gl"),
+            _grouped_def_with_second_parent_field("subledger"),
+        ],
+        homogeneity=100,
+        seed=42,
+        reconciliation_mode=True,
+        exact_fields=["transaction_id", "amount"],
+        field_breaks=[FieldBreakConfig(field_name="amount", break_rate=1.0, break_style="drift", drift_pct=0.1)],
+    )
+    resp = generate_datasets(req)
+
+    breaking_dataset_id = resp.datasets[1].dataset_id
+    gt_rows = db.execute(
+        "SELECT join_key_value, true_value FROM metadata_recon_breaks WHERE run_id = ? AND dataset_id = ?",
+        [resp.run_id, breaking_dataset_id],
+    ).fetchall()
+    assert len(gt_rows) == 20  # dataset[1]'s 20 child rows all broke on "amount" (break_rate=1.0)
+    gt_pairs = Counter((str(jk), str(tv)) for jk, tv in gt_rows)
+
+    authoritative_rows = db.execute(
+        f'SELECT transaction_id, amount FROM "{resp.datasets[0].table_name}"'
+    ).fetchall()
+    authoritative_pairs = Counter((str(tx), str(amount)) for tx, amount in authoritative_rows)
+
+    # Every recorded (join_key_value, true_value) pair must correspond exactly to a
+    # (transaction_id, amount) pair on the authoritative dataset — proving join_key_value
+    # is genuinely the parent's transaction_id, not e.g. the parent's "region" value
+    # (which an off-by-one index bug would have produced instead).
+    assert gt_pairs == authoritative_pairs
+
+
+def test_child_join_key_group_sizes_stay_random(db):
+    # Regression: a plain child-level join key (the existing, already-shipped case) must NOT
+    # switch to deterministic group sizing — this flag is scoped strictly to parent-level keys.
+    req = GenerateRequest(
+        datasets=[_grouped_def_with_parent_key("gl"), _grouped_def_with_parent_key("subledger")],
+        homogeneity=100,
+        seed=42,
+        overlap_ratio=1.0,
+        exact_fields=["amount"],  # child-level join key, no reconciliation_mode
+    )
+    resp = generate_datasets(req)
+    assert resp.datasets[0].row_count == 20
+    assert resp.datasets[1].row_count == 20

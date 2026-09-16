@@ -26,3 +26,13 @@ def build_overlap_pool(
             entry[field.name] = generate_field_value(fake, field, None)
         pool.append(entry)
     return pool
+
+
+def build_parent_pool(
+    fake: Faker,
+    parent_fields: list[FieldDefinition],
+    join_key_field: str,
+    num_groups: int,
+) -> list[dict]:
+    field = next(f for f in parent_fields if f.name == join_key_field)
+    return [{field.name: generate_field_value(fake, field, None)} for _ in range(num_groups)]

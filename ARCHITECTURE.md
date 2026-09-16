@@ -46,7 +46,7 @@ flowchart TB
         subgraph core["Core"]
             dbmgr["DuckDBManager\nRLock · transaction()"]
             valid["validation.py\ntable & column name guards"]
-            mig["migrations.py\n6 versioned migrations"]
+            mig["migrations.py\n7 versioned migrations"]
         end
     end
 
@@ -282,6 +282,18 @@ erDiagram
         TIMESTAMP fetched_at
     }
 
+    metadata_recon_breaks {
+        BIGINT id PK
+        BIGINT run_id FK
+        VARCHAR dataset_id FK
+        VARCHAR field_name
+        VARCHAR join_key_value
+        VARCHAR true_value
+        VARCHAR broken_value
+        VARCHAR break_style
+        TIMESTAMP created_at
+    }
+
     dataset_snapshot {
         VARCHAR dataset_id
         VARCHAR col_1
@@ -291,6 +303,8 @@ erDiagram
 
     metadata_runs        ||--o{ metadata_datasets     : "run_id (one run → many datasets)"
     metadata_datasets    ||--o{ metadata_aggregations  : "source_dataset (cascade-deleted)"
+    metadata_datasets    ||--o{ metadata_recon_breaks  : "dataset_id (cascade-deleted)"
+    metadata_runs        ||--o{ metadata_recon_breaks  : "run_id (one run → many ground-truth breaks)"
     metadata_datasets    ||--||  dataset_snapshot       : "table_name → dataset_{uuid}"
 ```
 
@@ -302,6 +316,7 @@ erDiagram
 |---|---|---|
 | `seq_run_id` | `metadata_runs.run_id` | Monotonic run counter |
 | `seq_aggregation_id` | `metadata_aggregations.id` | Monotonic aggregation counter (separate to avoid collisions with runs) |
+| `seq_recon_break_id` | `metadata_recon_breaks.id` | Monotonic reconciliation ground-truth break counter (separate from runs/aggregations) |
 
 ### Migration history
 
@@ -313,3 +328,4 @@ erDiagram
 | `004_template_runs_relation` | `metadata_runs.template_name` column |
 | `005_dataset_source` | `metadata_datasets.source` column |
 | `006_aggregation_sequence` | `seq_aggregation_id` sequence |
+| `007_recon_breaks` | `seq_recon_break_id` sequence · `metadata_recon_breaks` (reconciliation-mode ground truth) |

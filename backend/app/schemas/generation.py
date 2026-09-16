@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -30,6 +32,13 @@ class SharedKeyConfig(BaseModel):
     source_field: str
 
 
+class FieldBreakConfig(BaseModel):
+    field_name: str
+    break_rate: float = Field(default=0.0, ge=0.0, le=1.0)
+    break_style: Literal["drift", "different", "null"] = "drift"
+    drift_pct: float = Field(default=0.02, gt=0.0, le=1.0)
+
+
 class GroupConfig(BaseModel):
     num_groups: int = Field(..., ge=1, le=10000)
     split_pct: float = Field(default=100, ge=1, le=100)
@@ -54,6 +63,8 @@ class GenerateRequest(BaseModel):
     seed: int | None = None
     overlap_ratio: float = Field(default=0.0, ge=0.0, le=1.0)
     exact_fields: list[str] = Field(default_factory=list)
+    reconciliation_mode: bool = False
+    field_breaks: list[FieldBreakConfig] = Field(default_factory=list)
 
 
 class DatasetResult(BaseModel):
@@ -71,3 +82,16 @@ class GenerateResponse(BaseModel):
     datasets: list[DatasetResult]
     overlap_pool_size: int = 0
     exact_fields: list[str] = Field(default_factory=list)
+    break_count: int = 0
+
+
+class ReconBreakRecord(BaseModel):
+    id: int
+    run_id: int
+    dataset_id: str
+    field_name: str
+    join_key_value: str | None
+    true_value: str | None
+    broken_value: str | None
+    break_style: str
+    created_at: str

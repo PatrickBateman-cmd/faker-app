@@ -5,10 +5,14 @@ import random
 from faker import Faker
 
 from app.core.database import DuckDBManager
-from app.schemas.generation import DatasetResult, GenerateRequest, GenerateResponse
+from app.schemas.generation import DatasetResult, FieldBreakConfig, GenerateRequest, GenerateResponse
+from app.services.generation_engine.breaks import BreakRecord
 from app.services.generation_engine.flat import generate_dataset
 from app.services.generation_engine.grouped import generate_grouped_dataset
-from app.services.generation_engine.overlap import build_overlap_pool, effective_fields
+from app.services.generation_engine.overlap import build_overlap_pool, build_parent_pool, effective_fields
+from app.services.generation_engine.persistence import persist_recon_breaks
+
+_NUMERIC_TYPES = {"integer", "int", "float", "decimal", "number"}
 
 
 def generate_datasets(request: GenerateRequest) -> GenerateResponse:
@@ -17,9 +21,63 @@ def generate_datasets(request: GenerateRequest) -> GenerateResponse:
     main_fake.seed_instance(master_seed)
     random.seed(master_seed)
 
-    # Validate overlap config before touching DuckDB
     overlap_ratio = request.overlap_ratio
     exact_field_names = set(request.exact_fields)
+
+    join_key_field: str | None = None
+    join_key_is_parent = False
+    field_breaks_by_name: dict[str, FieldBreakConfig] = {}
+    if request.reconciliation_mode:
+        if len(request.datasets) < 2:
+            raise ValueError("reconciliation_mode requires at least 2 datasets")
+        if not request.exact_fields:
+            raise ValueError("reconciliation_mode requires exact_fields (join key first)")
+        if len({ds.rows for ds in request.datasets}) > 1:
+            raise ValueError("reconciliation_mode requires all datasets to declare the same number of rows")
+        overlap_ratio = 1.0
+        join_key_field = request.exact_fields[0]
+
+        join_key_is_parent = any(
+            ds.group_config and join_key_field in {f.name for f in ds.group_config.parent_fields}
+            for ds in request.datasets
+        )
+        if join_key_is_parent:
+            for ds in request.datasets:
+                parent_names = set() if not ds.group_config else {f.name for f in ds.group_config.parent_fields}
+                if not ds.group_config or join_key_field not in parent_names:
+                    raise ValueError(
+                        f"reconciliation_mode: parent-level join key '{join_key_field}' requires "
+                        f"every dataset to be grouped with '{join_key_field}' as a parent field"
+                    )
+            if len({ds.group_config.num_groups for ds in request.datasets}) > 1:
+                raise ValueError(
+                    "reconciliation_mode: parent-level join key requires all grouped datasets "
+                    "to declare the same num_groups"
+                )
+            if any(ds.group_config.split_pct != 100 for ds in request.datasets):
+                raise ValueError(
+                    "reconciliation_mode: parent-level join key requires split_pct=100 "
+                    "on every grouped dataset"
+                )
+
+        for fb in request.field_breaks:
+            if fb.field_name not in exact_field_names:
+                raise ValueError(f"field_breaks field '{fb.field_name}' must be listed in exact_fields")
+            if fb.field_name == join_key_field:
+                raise ValueError(f"field_breaks cannot target the join key field '{join_key_field}'")
+            if fb.break_style == "drift":
+                for ds in request.datasets:
+                    target = next((f for f in effective_fields(ds) if f.name == fb.field_name), None)
+                    if target is not None and target.type.lower() not in _NUMERIC_TYPES:
+                        raise ValueError(
+                            f"field_breaks '{fb.field_name}' uses break_style='drift' but field type "
+                            f"'{target.type}' is not numeric in dataset '{ds.name}'"
+                        )
+            field_breaks_by_name[fb.field_name] = fb
+    elif request.field_breaks:
+        raise ValueError("field_breaks requires reconciliation_mode=True")
+
+    # Validate overlap config before touching DuckDB
     if overlap_ratio > 0:
         if not exact_field_names:
             raise ValueError("exact_fields must be specified when overlap_ratio > 0")
@@ -27,7 +85,7 @@ def generate_datasets(request: GenerateRequest) -> GenerateResponse:
             if ds.group_config:
                 parent_names = {f.name for f in ds.group_config.parent_fields}
                 for ef in exact_field_names:
-                    if ef in parent_names:
+                    if ef in parent_names and not (join_key_is_parent and ef == join_key_field):
                         raise ValueError(
                             f"exact field '{ef}' is a parent field in grouped dataset '{ds.name}'; "
                             "overlap only supports child-level fields for grouped datasets"
@@ -44,14 +102,25 @@ def generate_datasets(request: GenerateRequest) -> GenerateResponse:
     # Build the global overlap pool once
     overlap_pool: list[dict] = []
     pool_size = 0
+    parent_pool: list[dict] = []
+    row_exact_field_names = exact_field_names
+    if join_key_is_parent:
+        row_exact_field_names = exact_field_names - {join_key_field}
+        first_group_cfg = request.datasets[0].group_config
+        assert first_group_cfg is not None
+        parent_pool = build_parent_pool(
+            main_fake, first_group_cfg.parent_fields, join_key_field, first_group_cfg.num_groups
+        )
     if overlap_ratio > 0 and request.datasets:
         pool_size = int(min(d.rows for d in request.datasets) * overlap_ratio)
         if pool_size > 0:
             first_fields = effective_fields(request.datasets[0])
-            overlap_pool = build_overlap_pool(main_fake, first_fields, exact_field_names, pool_size)
+            overlap_pool = build_overlap_pool(main_fake, first_fields, row_exact_field_names, pool_size)
 
+    ground_truth: list[BreakRecord] = []
     dataset_results: list[DatasetResult] = []
-    for dataset_def in request.datasets:
+    for idx, dataset_def in enumerate(request.datasets):
+        ds_field_breaks = field_breaks_by_name if idx > 0 else {}
         if dataset_def.group_config:
             dr = generate_grouped_dataset(
                 fake=main_fake,
@@ -61,6 +130,11 @@ def generate_datasets(request: GenerateRequest) -> GenerateResponse:
                 master_seed=master_seed,
                 overlap_pool=overlap_pool,
                 exact_field_names=exact_field_names,
+                join_key_field=join_key_field,
+                field_breaks=ds_field_breaks,
+                ground_truth=ground_truth,
+                parent_pool=parent_pool,
+                deterministic_group_sizes=join_key_is_parent,
             )
         else:
             dr = generate_dataset(
@@ -71,8 +145,14 @@ def generate_datasets(request: GenerateRequest) -> GenerateResponse:
                 master_seed=master_seed,
                 overlap_pool=overlap_pool,
                 exact_field_names=exact_field_names,
+                join_key_field=join_key_field,
+                field_breaks=ds_field_breaks,
+                ground_truth=ground_truth,
             )
         dataset_results.append(dr)
+
+    if ground_truth:
+        persist_recon_breaks(db, run_id, ground_truth)
 
     return GenerateResponse(
         run_id=run_id,
@@ -80,5 +160,6 @@ def generate_datasets(request: GenerateRequest) -> GenerateResponse:
         seed=master_seed,
         datasets=dataset_results,
         overlap_pool_size=pool_size,
-        exact_fields=list(exact_field_names),
+        exact_fields=request.exact_fields,
+        break_count=len(ground_truth),
     )
