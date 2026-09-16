@@ -12,3 +12,4 @@ duckdb/
 .vite/
 *.pyc
 .DS_Store
+.claude/worktrees/
