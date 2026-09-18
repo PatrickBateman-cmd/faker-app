@@ -24,3 +24,8 @@ async def get_breaks(
     offset: int = Query(0, ge=0),
 ):
     return generation_engine.get_recon_breaks(run_id, limit=limit, offset=offset)
+
+
+@router.get("/runs/{run_id}/balances")
+async def get_balances(run_id: int):
+    return generation_engine.get_balance_sets(run_id)

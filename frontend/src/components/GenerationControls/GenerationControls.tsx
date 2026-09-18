@@ -7,6 +7,7 @@ import { fetchTemplate, fetchTemplates, generateDatasets } from "../../api/gener
 import { GenerationResults } from "../ResultsViewer/ResultsViewer";
 import { CollapsibleSection } from "../CollapsibleSection/CollapsibleSection";
 import type {
+  BalanceConfig,
   DatasetDefinition,
   DatasetResult,
   FieldBreakConfig,
@@ -98,6 +99,7 @@ export function GenerationControls({ onNavigate, pendingTemplate: externalTempla
   const [exactFields, setExactFields] = useState("");
   const [reconciliationMode, setReconciliationMode] = useState(false);
   const [fieldBreaks, setFieldBreaks] = useState<FieldBreakConfig[]>([]);
+  const [balances, setBalances] = useState<BalanceConfig[]>([]);
   const [results, setResults] = useState<DatasetResult[] | null>(null);
   const [overlapPoolSize, setOverlapPoolSize] = useState<number>(0);
   const [resultExactFields, setResultExactFields] = useState<string[]>([]);
@@ -269,6 +271,7 @@ export function GenerationControls({ onNavigate, pendingTemplate: externalTempla
       setOverlapRatio(100);
     } else {
       setFieldBreaks([]);
+      setBalances([]);
     }
     setResults(null);
   }
@@ -301,6 +304,55 @@ export function GenerationControls({ onNavigate, pendingTemplate: externalTempla
     setFieldBreaks((prev) => prev.filter((_, i) => i !== index));
   }
 
+  function emptyBalance(): BalanceConfig {
+    return {
+      name: "Balances",
+      source_dataset: datasets[0]?.name || "",
+      date_field: "",
+      amount_field: "",
+      group_by: [],
+      sign_field: "",
+      positive_values: [],
+      opening_balance: null,
+      days: 5,
+      records_per_day: 10,
+    };
+  }
+
+  function addBalance() {
+    setBalances((prev) => [...prev, emptyBalance()]);
+  }
+
+  function updateBalance(index: number, updater: (b: BalanceConfig) => BalanceConfig) {
+    setBalances((prev) => prev.map((b, i) => (i === index ? updater(b) : b)));
+  }
+
+  function removeBalance(index: number) {
+    setBalances((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  // All field names on a dataset (parent + child for grouped datasets).
+  function allFieldNames(ds: DatasetDefinition | undefined): string[] {
+    if (!ds) return [];
+    const source = ds.group_config
+      ? [...ds.group_config.parent_fields, ...ds.group_config.child_fields]
+      : ds.fields;
+    return source.map((f) => f.name).filter(Boolean);
+  }
+
+  // Reconciliation volume scaling: Total = days × records_per_day.
+  // When both are set, keep the source dataset's rows in sync so the backend
+  // validation (rows == days × records_per_day) passes out of the box.
+  function syncBalanceScaling(b: BalanceConfig) {
+    if (b.days && b.records_per_day) {
+      const expected = b.days * b.records_per_day;
+      const srcIdx = datasets.findIndex((d) => d.name === b.source_dataset);
+      if (srcIdx !== -1) {
+        updateDataset(srcIdx, (d) => ({ ...d, rows: expected }));
+      }
+    }
+  }
+
   function handleGenerate() {
     const seedVal = seed ? parseInt(seed, 10) : undefined;
     const parsedExactFields = exactFields
@@ -325,6 +377,20 @@ export function GenerationControls({ onNavigate, pendingTemplate: externalTempla
                 ...fb,
                 break_rate: fb.break_rate / 100,
                 drift_pct: fb.drift_pct / 100,
+              })),
+            balances: balances
+              .filter((b) => b.amount_field && b.date_field && b.source_dataset)
+              .map((b) => ({
+                name: b.name,
+                source_dataset: b.source_dataset,
+                date_field: b.date_field,
+                amount_field: b.amount_field,
+                group_by: b.group_by.filter(Boolean),
+                sign_field: b.sign_field || null,
+                positive_values: b.positive_values.filter(Boolean),
+                opening_balance: b.opening_balance,
+                days: b.days,
+                records_per_day: b.records_per_day,
               })),
           }
         : {}),
@@ -529,6 +595,172 @@ export function GenerationControls({ onNavigate, pendingTemplate: externalTempla
             className="self-start text-xs text-[var(--muted)] hover:text-[var(--text)] disabled:opacity-40 disabled:cursor-not-allowed"
           >
             + Add break rule
+          </button>
+        </div>
+      )}
+
+      {reconciliationMode && (
+        <div className="flex flex-col gap-2 bg-[var(--surface)] border border-[var(--border)] rounded p-3">
+          <p className="text-xs font-semibold text-[var(--accent)] uppercase tracking-wider">Balances</p>
+          <p className="text-xs text-[var(--muted)]">
+            Derive aggregated balances per partition from a generated dataset, with opening/closing
+            continuity across days and control totals (sum positives / sum negatives / record count).
+          </p>
+          {balances.length === 0 ? (
+            <p className="text-xs text-[var(--muted)]">
+              No balance sets — transactions are generated without aggregated balance outputs.
+            </p>
+          ) : null}
+          {balances.map((b, i) => {
+            const srcFields = allFieldNames(datasets.find((d) => d.name === b.source_dataset));
+            return (
+              <div key={i} className="flex flex-col gap-2 border border-[var(--border)] rounded p-2">
+                <div className="flex items-center gap-2 text-xs">
+                  <input
+                    value={b.name}
+                    onChange={(e) => updateBalance(i, (x) => ({ ...x, name: e.target.value }))}
+                    className="w-28 bg-[var(--elevated)] border border-[var(--border)] rounded px-1.5 py-1 text-[var(--text)]"
+                    placeholder="Balances"
+                  />
+                  <select
+                    value={b.source_dataset}
+                    onChange={(e) =>
+                      updateBalance(i, (x) => ({ ...x, source_dataset: e.target.value }))
+                    }
+                    className="w-32 bg-[var(--elevated)] border border-[var(--border)] rounded px-1.5 py-1 text-[var(--text)]"
+                  >
+                    <option value="" disabled>source dataset…</option>
+                    {datasets.map((d) => (
+                      <option key={d.name} value={d.name}>{d.name}</option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={() => removeBalance(i)}
+                    className="text-[var(--muted)] hover:text-[var(--red)] px-1"
+                    title="Remove balance set"
+                  >
+                    x
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2 text-xs flex-wrap">
+                  <select
+                    value={b.date_field}
+                    onChange={(e) => updateBalance(i, (x) => ({ ...x, date_field: e.target.value }))}
+                    className="w-32 bg-[var(--elevated)] border border-[var(--border)] rounded px-1.5 py-1 text-[var(--text)]"
+                  >
+                    <option value="" disabled>date field…</option>
+                    {srcFields.map((f) => (
+                      <option key={f} value={f}>{f}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={b.amount_field}
+                    onChange={(e) => updateBalance(i, (x) => ({ ...x, amount_field: e.target.value }))}
+                    className="w-32 bg-[var(--elevated)] border border-[var(--border)] rounded px-1.5 py-1 text-[var(--text)]"
+                  >
+                    <option value="" disabled>amount field…</option>
+                    {srcFields.map((f) => (
+                      <option key={f} value={f}>{f}</option>
+                    ))}
+                  </select>
+                  <label className="text-[var(--muted)]">Group by:</label>
+                  <input
+                    type="text"
+                    value={b.group_by.join(", ")}
+                    onChange={(e) =>
+                      updateBalance(i, (x) => ({
+                        ...x,
+                        group_by: e.target.value.split(",").map((s) => s.trim()).filter(Boolean),
+                      }))
+                    }
+                    placeholder="account, currency"
+                    className="w-40 bg-[var(--elevated)] border border-[var(--border)] rounded px-1.5 py-1 text-[var(--text)]"
+                  />
+                </div>
+
+                <div className="flex items-center gap-2 text-xs flex-wrap">
+                  <select
+                    value={b.sign_field || ""}
+                    onChange={(e) => updateBalance(i, (x) => ({ ...x, sign_field: e.target.value }))}
+                    className="w-32 bg-[var(--elevated)] border border-[var(--border)] rounded px-1.5 py-1 text-[var(--text)]"
+                  >
+                    <option value="">amount signed as-is</option>
+                    {srcFields.map((f) => (
+                      <option key={f} value={f}>{f}</option>
+                    ))}
+                  </select>
+                  {b.sign_field && (
+                    <input
+                      type="text"
+                      value={b.positive_values.join(", ")}
+                      onChange={(e) =>
+                        updateBalance(i, (x) => ({
+                          ...x,
+                          positive_values: e.target.value.split(",").map((s) => s.trim()).filter(Boolean),
+                        }))
+                      }
+                      placeholder="positive values, e.g. Credit, Deposit"
+                      className="w-48 bg-[var(--elevated)] border border-[var(--border)] rounded px-1.5 py-1 text-[var(--text)]"
+                    />
+                  )}
+                  <label className="text-[var(--muted)]">Opening:</label>
+                  <input
+                    type="number"
+                    value={b.opening_balance ?? ""}
+                    onChange={(e) =>
+                      updateBalance(i, (x) => ({
+                        ...x,
+                        opening_balance: e.target.value ? Number(e.target.value) : null,
+                      }))
+                    }
+                    placeholder="0"
+                    className="w-20 bg-[var(--elevated)] border border-[var(--border)] rounded px-1.5 py-1 text-[var(--text)]"
+                  />
+                </div>
+
+                <div className="flex items-center gap-2 text-xs flex-wrap">
+                  <label className="text-[var(--muted)]">Days:</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={b.days ?? ""}
+                    onChange={(e) => {
+                      const days = e.target.value ? Number(e.target.value) : null;
+                      const next = { ...b, days };
+                      updateBalance(i, () => next);
+                      syncBalanceScaling(next);
+                    }}
+                    className="w-16 bg-[var(--elevated)] border border-[var(--border)] rounded px-1.5 py-1 text-[var(--text)]"
+                  />
+                  <label className="text-[var(--muted)]">Records/day:</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={b.records_per_day ?? ""}
+                    onChange={(e) => {
+                      const perDay = e.target.value ? Number(e.target.value) : null;
+                      const next = { ...b, records_per_day: perDay };
+                      updateBalance(i, () => next);
+                      syncBalanceScaling(next);
+                    }}
+                    className="w-16 bg-[var(--elevated)] border border-[var(--border)] rounded px-1.5 py-1 text-[var(--text)]"
+                  />
+                  {b.days && b.records_per_day && (
+                    <span className="text-[var(--accent)]">
+                      Total records = {b.days} × {b.records_per_day} = {b.days * b.records_per_day}
+                    </span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+          <button
+            onClick={addBalance}
+            disabled={!datasets.some((d) => d.name)}
+            className="self-start text-xs text-[var(--muted)] hover:text-[var(--text)] disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            + Add balance set
           </button>
         </div>
       )}

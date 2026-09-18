@@ -102,6 +102,21 @@ MIGRATIONS: list[tuple[str, str]] = [
         );
     """,
     ),
+    (
+        "008_balance_sets",
+        """
+        CREATE SEQUENCE IF NOT EXISTS seq_balance_id START 1;
+        CREATE TABLE IF NOT EXISTS metadata_balance_sets (
+            id BIGINT PRIMARY KEY DEFAULT nextval('seq_balance_id'),
+            run_id BIGINT NOT NULL,
+            dataset_id VARCHAR NOT NULL,
+            source_dataset VARCHAR NOT NULL,
+            name VARCHAR NOT NULL,
+            config_json VARCHAR,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    """,
+    ),
 ]
 
 

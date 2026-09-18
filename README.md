@@ -83,6 +83,8 @@ uv run faker financial batch "AAPL,MSFT" --history --period 1mo     # History (t
 uv run faker financial enrich <ID> --ticker-column sym --enrich price,volume  # Enrich
 uv run faker transform aggregate <ID> --name "r" --group-by country --agg "amount:sum:total"  # Aggregate
 uv run faker transform dedup <ID> --name "r" --keys email      # Deduplicate
+uv run faker generate --name "txns" --rows 1000 --fields-json '[...]' --reconciliation-mode \
+  --balances-json '[{"name":"balances","source_dataset":"txns","date_field":"posting_date","amount_field":"amount","group_by":["account"]}]'  # Balance set
 ```
 
 All CLI commands support `--format json` and `--db <path>`.
@@ -97,7 +99,7 @@ uv run faker --show-completion      # Preview script
 ### Tests
 
 ```sh
-cd backend && uv run pytest tests/ -v     # 40 backend tests
+cd backend && uv run pytest tests/ -v     # 157 backend tests
 cd frontend && npx vitest run             # 2 frontend tests
 ```
 

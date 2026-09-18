@@ -30,6 +30,19 @@ export interface FieldBreakConfig {
   drift_pct: number;
 }
 
+export interface BalanceConfig {
+  name: string;
+  source_dataset: string;
+  date_field: string;
+  amount_field: string;
+  group_by: string[];
+  sign_field: string | null;
+  positive_values: string[];
+  opening_balance: number | null;
+  days: number | null;
+  records_per_day: number | null;
+}
+
 export interface GenerateRequest {
   datasets: DatasetDefinition[];
   homogeneity: number;
@@ -38,6 +51,7 @@ export interface GenerateRequest {
   exact_fields?: string[];
   reconciliation_mode?: boolean;
   field_breaks?: FieldBreakConfig[];
+  balances?: BalanceConfig[];
 }
 
 export interface DatasetResult {

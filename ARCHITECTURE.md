@@ -46,7 +46,7 @@ flowchart TB
         subgraph core["Core"]
             dbmgr["DuckDBManager\nRLock · transaction()"]
             valid["validation.py\ntable & column name guards"]
-            mig["migrations.py\n7 versioned migrations"]
+            mig["migrations.py\n8 versioned migrations"]
         end
     end
 
@@ -294,6 +294,16 @@ erDiagram
         TIMESTAMP created_at
     }
 
+    metadata_balance_sets {
+        BIGINT id PK
+        BIGINT run_id FK
+        VARCHAR dataset_id FK
+        VARCHAR source_dataset
+        VARCHAR name
+        VARCHAR config_json
+        TIMESTAMP created_at
+    }
+
     dataset_snapshot {
         VARCHAR dataset_id
         VARCHAR col_1
@@ -301,10 +311,11 @@ erDiagram
         VARCHAR col_N
     }
 
-    metadata_runs        ||--o{ metadata_datasets     : "run_id (one run → many datasets)"
+    metadata_runs        ||--o{ metadata_datasets      : "run_id (one run → many datasets)"
     metadata_datasets    ||--o{ metadata_aggregations  : "source_dataset (cascade-deleted)"
     metadata_datasets    ||--o{ metadata_recon_breaks  : "dataset_id (cascade-deleted)"
     metadata_runs        ||--o{ metadata_recon_breaks  : "run_id (one run → many ground-truth breaks)"
+    metadata_runs        ||--o{ metadata_balance_sets  : "run_id (one run → many balance sets)"
     metadata_datasets    ||--||  dataset_snapshot       : "table_name → dataset_{uuid}"
 ```
 
@@ -317,6 +328,7 @@ erDiagram
 | `seq_run_id` | `metadata_runs.run_id` | Monotonic run counter |
 | `seq_aggregation_id` | `metadata_aggregations.id` | Monotonic aggregation counter (separate to avoid collisions with runs) |
 | `seq_recon_break_id` | `metadata_recon_breaks.id` | Monotonic reconciliation ground-truth break counter (separate from runs/aggregations) |
+| `seq_balance_id` | `metadata_balance_sets.id` | Monotonic balance-set counter (derived/aggregated balances per run) |
 
 ### Migration history
 
@@ -329,3 +341,4 @@ erDiagram
 | `005_dataset_source` | `metadata_datasets.source` column |
 | `006_aggregation_sequence` | `seq_aggregation_id` sequence |
 | `007_recon_breaks` | `seq_recon_break_id` sequence · `metadata_recon_breaks` (reconciliation-mode ground truth) |
+| `008_balance_sets` | `seq_balance_id` sequence · `metadata_balance_sets` (per-run balance aggregation metadata) |

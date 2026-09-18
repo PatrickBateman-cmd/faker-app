@@ -57,7 +57,7 @@ backend/app/
   config.py        – Settings via pydantic-settings; reads .env at repo root (Path(__file__).parent.parent.parent / ".env")
   core/
     database.py    – Thread-safe DuckDB singleton (DuckDBManager.get_instance()); RLock on execute + transaction()
-    migrations.py  – Versioned SQL migrations; auto-run on startup; currently 7 migrations
+    migrations.py  – Versioned SQL migrations; auto-run on startup; currently 8 migrations
     validation.py  – validate_column_name() / validate_table_name() — must use before any SQL interpolation
   routers/         – Thin HTTP layer; one APIRouter per domain
   schemas/         – Pydantic request/response models
@@ -71,8 +71,8 @@ Layering: **routers → services → DuckDBManager**. Never call DuckDBManager d
 
 ### DuckDB conventions
 - Every dataset gets a table named `dataset_{uuid4}`. Always double-quote in SQL: `"dataset_..."`.
-- Metadata tables: `metadata_datasets`, `metadata_templates`, `metadata_runs`, `metadata_aggregations`, `metadata_iso_cache`, `metadata_recon_breaks`.
-- Three sequences: `seq_run_id` (runs), `seq_aggregation_id` (aggregations/dedup), and `seq_recon_break_id` (reconciliation ground-truth breaks). **Do not mix them** — aggregation INSERTs must use `nextval('seq_aggregation_id')` explicitly, and recon-break INSERTs must use `nextval('seq_recon_break_id')` explicitly.
+- Metadata tables: `metadata_datasets`, `metadata_templates`, `metadata_runs`, `metadata_aggregations`, `metadata_iso_cache`, `metadata_recon_breaks`, `metadata_balance_sets`.
+- Four sequences: `seq_run_id` (runs), `seq_aggregation_id` (aggregations/dedup), `seq_recon_break_id` (reconciliation ground-truth breaks), and `seq_balance_id` (balance sets). **Do not mix them** — aggregation INSERTs must use `nextval('seq_aggregation_id')` explicitly, recon-break INSERTs must use `nextval('seq_recon_break_id')` explicitly, and balance-set INSERTs must use `nextval('seq_balance_id')` explicitly.
 - Dataset tables are **immutable snapshots** — never updated after creation. Aggregation/dedup always creates a new table.
 - Schema changes go through `migrations.py` — add a `Migration` entry with a monotonically increasing key. Each migration runs inside `BEGIN`/`COMMIT`/`ROLLBACK`; partial failures roll back atomically.
 - All migrations use `IF NOT EXISTS` (idempotent), and the applied-marker is written inside the same transaction.
@@ -144,6 +144,22 @@ uv run faker generate --name "trades" --rows 1000 --groups 4 --split-pct 80 \
   --child-fields-json '[{"name":"qty","generator":"random_int","type":"integer","constraint":{"min":10,"max":1000}}]'
 ```
 
+### Balance aggregation (reconciliation sets)
+When `--reconciliation-mode` is on, `--balances-json` derives aggregate balance partitions from a generated transaction dataset. Per partition (date × group-by keys) the engine computes **sum_positives**, **sum_negatives**, **record_count**, plus **opening_balance** / **closing_balance** with day-over-day continuity (Day-1 opening defaults to 0, subsequent days carry the previous closing). Control totals are transaction-only; the invariant is `sum_pos + sum_neg ≡ closing − opening`. Reconciliation scaling: when both `days` and `records_per_day` are set, `source.rows` must equal `days × records_per_day`.
+
+```bash
+uv run faker generate --name "txns" --rows 1000 \
+  --fields-json '[{"name":"txn_id","generator":"uuid4","type":"string"},{"name":"account","generator":"random_element","type":"string","constraint":{"values":"ACC-1,ACC-2"}},{"name":"amount","generator":"pydecimal","type":"float","constraint":{"min":-500,"max":500,"right_digits":2}},{"name":"posting_date","generator":"date_between","type":"date","constraint":{"start":"-4d","end":"today"}}]' \
+  --reconciliation-mode \
+  --balances-json '[{"name":"balances","source_dataset":"txns","date_field":"posting_date","amount_field":"amount","group_by":["account"],"opening_balance":0,"days":5,"records_per_day":200}]'
+
+uv run faker generate balances <RUN_ID>   # view persisted balance-set metadata
+```
+
+- `sign_field` + `positive_values` map transaction types to signed amounts (e.g. `transaction_type` with positives `Credit,Deposit`; everything else is negated). Without it, amounts are used signed as-is.
+- Balance datasets are derived after the source is materialized (SQL `GROUP BY` + Python continuity pass) and returned as extra `DatasetResult`s in `/generate`. They are ordinary `dataset_{uuid}` tables.
+- Backend file: `backend/app/services/generation_engine/balance.py`.
+
 ### Frontend layout
 ```
 frontend/src/
@@ -186,6 +202,7 @@ Routing: react-router-dom `<Routes>` + `<Route>`. 7 pages: `/`, `/templates`, `/
 |---|---|---|
 | `POST` | `/generate` | Generate 1–4 datasets |
 | `GET` | `/generate/runs/{run_id}/breaks?limit=1000&offset=0` | Paginated reconciliation ground-truth breaks for a run |
+| `GET` | `/generate/runs/{run_id}/balances` | Balance-set metadata (config + control totals) for a run |
 | `GET` | `/datasets` | List datasets |
 | `GET` | `/datasets/{id}/rows?page=1&per_page=100` | Paginated rows |
 | `GET` | `/datasets/{id}/columns` | Column names |

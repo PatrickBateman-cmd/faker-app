@@ -55,6 +55,19 @@ class DatasetDefinition(BaseModel):
     group_config: GroupConfig | None = None
 
 
+class BalanceConfig(BaseModel):
+    name: str
+    source_dataset: str
+    date_field: str
+    amount_field: str
+    group_by: list[str] = Field(default_factory=list)
+    sign_field: str | None = None
+    positive_values: list[str] = Field(default_factory=list)
+    opening_balance: float | None = None
+    days: int | None = Field(default=None, ge=1)
+    records_per_day: int | None = Field(default=None, ge=1)
+
+
 class GenerateRequest(BaseModel):
     datasets: list[DatasetDefinition] = Field(
         ..., min_length=1, max_length=4
@@ -65,6 +78,7 @@ class GenerateRequest(BaseModel):
     exact_fields: list[str] = Field(default_factory=list)
     reconciliation_mode: bool = False
     field_breaks: list[FieldBreakConfig] = Field(default_factory=list)
+    balances: list[BalanceConfig] = Field(default_factory=list)
 
 
 class DatasetResult(BaseModel):
@@ -94,4 +108,14 @@ class ReconBreakRecord(BaseModel):
     true_value: str | None
     broken_value: str | None
     break_style: str
+    created_at: str
+
+
+class BalanceControlRecord(BaseModel):
+    id: int
+    run_id: int
+    dataset_id: str
+    source_dataset: str
+    name: str
+    config_json: str
     created_at: str

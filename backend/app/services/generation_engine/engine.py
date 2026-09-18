@@ -6,6 +6,7 @@ from faker import Faker
 
 from app.core.database import DuckDBManager
 from app.schemas.generation import DatasetResult, FieldBreakConfig, GenerateRequest, GenerateResponse
+from app.services.generation_engine.balance import generate_balance_dataset
 from app.services.generation_engine.breaks import BreakRecord
 from app.services.generation_engine.flat import generate_dataset
 from app.services.generation_engine.grouped import generate_grouped_dataset
@@ -28,14 +29,15 @@ def generate_datasets(request: GenerateRequest) -> GenerateResponse:
     join_key_is_parent = False
     field_breaks_by_name: dict[str, FieldBreakConfig] = {}
     if request.reconciliation_mode:
-        if len(request.datasets) < 2:
+        if len(request.datasets) < 2 and not request.balances:
             raise ValueError("reconciliation_mode requires at least 2 datasets")
-        if not request.exact_fields:
+        if not request.exact_fields and not request.balances:
             raise ValueError("reconciliation_mode requires exact_fields (join key first)")
         if len({ds.rows for ds in request.datasets}) > 1:
             raise ValueError("reconciliation_mode requires all datasets to declare the same number of rows")
         overlap_ratio = 1.0
-        join_key_field = request.exact_fields[0]
+        if request.exact_fields:
+            join_key_field = request.exact_fields[0]
 
         join_key_is_parent = any(
             ds.group_config and join_key_field in {f.name for f in ds.group_config.parent_fields}
@@ -77,8 +79,28 @@ def generate_datasets(request: GenerateRequest) -> GenerateResponse:
     elif request.field_breaks:
         raise ValueError("field_breaks requires reconciliation_mode=True")
 
+    if request.balances:
+        if not request.reconciliation_mode:
+            raise ValueError("balances require reconciliation_mode=True")
+        ds_names = [d.name for d in request.datasets]
+        if len(set(ds_names)) != len(ds_names):
+            raise ValueError("balances require unique dataset names so sources can be resolved")
+        for bc in request.balances:
+            if bc.source_dataset not in ds_names:
+                raise ValueError(
+                    f"balance '{bc.name}': source dataset '{bc.source_dataset}' is not part of this run"
+                )
+            if bc.days is not None and bc.records_per_day is not None:
+                src_def = next(d for d in request.datasets if d.name == bc.source_dataset)
+                expected = bc.days * bc.records_per_day
+                if src_def.rows != expected:
+                    raise ValueError(
+                        f"balance '{bc.name}': reconciliation scaling requires source rows == "
+                        f"days × records_per_day ({expected}), got {src_def.rows}"
+                    )
+
     # Validate overlap config before touching DuckDB
-    if overlap_ratio > 0:
+    if overlap_ratio > 0 and not (request.balances and not exact_field_names):
         if not exact_field_names:
             raise ValueError("exact_fields must be specified when overlap_ratio > 0")
         for ds in request.datasets:
@@ -111,7 +133,7 @@ def generate_datasets(request: GenerateRequest) -> GenerateResponse:
         parent_pool = build_parent_pool(
             main_fake, first_group_cfg.parent_fields, join_key_field, first_group_cfg.num_groups
         )
-    if overlap_ratio > 0 and request.datasets:
+    if overlap_ratio > 0 and row_exact_field_names and request.datasets:
         pool_size = int(min(d.rows for d in request.datasets) * overlap_ratio)
         if pool_size > 0:
             first_fields = effective_fields(request.datasets[0])
@@ -150,6 +172,19 @@ def generate_datasets(request: GenerateRequest) -> GenerateResponse:
                 ground_truth=ground_truth,
             )
         dataset_results.append(dr)
+
+    if request.balances:
+        dataset_by_name = {dr.name: dr for dr in dataset_results}
+        for bc in request.balances:
+            src_result = dataset_by_name[bc.source_dataset]
+            balance_result = generate_balance_dataset(
+                source_table=src_result.table_name,
+                config=bc,
+                run_id=run_id,
+                homogeneity=request.homogeneity,
+                master_seed=master_seed,
+            )
+            dataset_results.append(balance_result)
 
     if ground_truth:
         persist_recon_breaks(db, run_id, ground_truth)
