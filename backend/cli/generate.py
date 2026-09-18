@@ -4,6 +4,7 @@ import typer
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from app.schemas.generation import (
+    BalanceConfig,
     ConstraintConfig,
     DatasetDefinition,
     FieldBreakConfig,
@@ -47,6 +48,7 @@ def generate(
     exact_fields: str = typer.Option(None, "--exact-fields", help="Comma-separated field names shared across datasets; first is the join key"),
     overlap_ratio: float = typer.Option(0.0, "--overlap-ratio", help="Fraction of rows drawn from the shared pool (0.0-1.0)", min=0.0, max=1.0),
     field_breaks_json: str = typer.Option(None, "--field-breaks-json", help="Inline JSON list of field break configs (requires --reconciliation-mode)"),
+    balances_json: str = typer.Option(None, "--balances-json", help="Inline JSON list of balance aggregation configs (requires --reconciliation-mode)"),
 ) -> None:
     """Generate synthetic datasets from field definitions or a template."""
     if ctx.invoked_subcommand is not None:
@@ -127,6 +129,9 @@ def generate(
     field_breaks_list = (
         [FieldBreakConfig(**fb) for fb in json.loads(field_breaks_json)] if field_breaks_json else []
     )
+    balances_list = (
+        [BalanceConfig(**bc) for bc in json.loads(balances_json)] if balances_json else []
+    )
 
     if groups is not None:
         pf = json.loads(parent_fields_json) if parent_fields_json else []
@@ -148,6 +153,7 @@ def generate(
         exact_fields=exact_fields_list,
         reconciliation_mode=reconciliation_mode,
         field_breaks=field_breaks_list,
+        balances=balances_list,
     )
 
     if not quiet:
@@ -249,6 +255,30 @@ def breaks_cmd(
     output_result(
         f"Reconciliation breaks for run {run_id} ({len(records)})",
         ["ID", "Dataset", "Field", "Join Key", "True Value", "Broken Value", "Style"],
+        rows_out,
+        fmt,
+        json_data=[r.model_dump() for r in records],
+    )
+
+
+@app.command("balances")
+def balances_cmd(
+    run_id: int = typer.Argument(..., help="Run ID returned by `faker generate`"),
+    fmt: str = typer.Option("table", "--format", "-f", help="Output format"),
+    db: str = typer.Option(None, "--db", "-d", help="DuckDB path override"),
+) -> None:
+    """Show the balance aggregation sets computed for a run."""
+    state = get_state()
+    state.ensure_db(db=db)
+
+    records = generation_engine.get_balance_sets(run_id)
+    rows_out = [
+        [str(r.id), str(r.run_id), r.dataset_id, r.source_dataset, r.name]
+        for r in records
+    ]
+    output_result(
+        f"Balance sets for run {run_id} ({len(records)})",
+        ["ID", "Run", "Dataset", "Source", "Name"],
         rows_out,
         fmt,
         json_data=[r.model_dump() for r in records],
