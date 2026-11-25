@@ -78,13 +78,22 @@ uv run faker transform aggregate <DATASET_ID> --name "by_country" --group-by "co
 # Deduplicate a dataset
 uv run faker transform dedup <DATASET_ID> --name "unique" --keys "email"
 
+# Balance aggregation (reconciliation set): derive per-partition balances from a
+# generated transaction dataset (opening/closing continuity + control totals).
+uv run faker generate --name "txns" --rows 1000 --fields-json '[...]' \
+  --reconciliation-mode \
+  --balances-json '[{"name":"balances","source_dataset":"txns","date_field":"posting_date","amount_field":"amount","group_by":["account"],"opening_balance":0,"days":5,"records_per_day":200}]'
+
+# View persisted balance-set metadata for a run
+uv run faker generate balances <RUN_ID>
+
 # All commands support --format json and --db <path>
 ```
 
 ### Tests
 
 ```sh
-cd backend && uv run pytest tests/ -v     # 40 backend tests
+cd backend && uv run pytest tests/ -v     # 157 backend tests
 cd frontend && npx vitest run             # 2 frontend tests
 ```
 
@@ -117,7 +126,7 @@ frontend/Dockerfile              ← Multi-stage nginx production image
 docker-compose.yml               ← Backend + Frontend services
 ```
 
-Key service files: `generation_engine.py`, `dataset_service.py`, `transform_service.py` (aggregation+dedup), `export_service.py`, `template_library.py`, `iso20022_service.py`, `financial_service.py`.
+Key service files: `generation_engine.py`, `dataset_service.py`, `transform_service.py` (aggregation+dedup), `export_service.py`, `template_library.py`, `iso20022_service.py`, `financial_service.py`. The generation engine is a package (`app/services/generation_engine/*`) with `balance.py` (balance aggregation/continuity), `breaks.py` (field breaks/ground truth), `queries.py` (recon-break + balance-set reads).
 
 ## Backend conventions
 
@@ -204,6 +213,7 @@ npm run test    # vitest run                       # frontend tests
 | **Backend test suite** | 40 pytest tests covering all services + API |
 | **Frontend test suite** | 2 vitest smoke tests |
 | **Parent-child grouped generation** | `--groups N` distributes rows randomly across N parent groups with `parent_id` column; `split_pct` controls % of rows in groups |
+| **Balance aggregation** | Reconciliation-mode `balances` derive per-partition balances (opening/closing continuity + sum-positives/negatives/count control totals) from a generated transaction dataset; scaling = `days × records_per_day`; CLI `--balances-json` + `faker generate balances`; `GET /generate/runs/{id}/balances` |
 
 ## Remaining known issues
 

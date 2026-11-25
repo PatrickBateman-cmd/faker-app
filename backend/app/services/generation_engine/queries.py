@@ -1,10 +1,36 @@
 from __future__ import annotations
 
 from app.core.database import DuckDBManager
-from app.schemas.generation import ReconBreakRecord
+from app.schemas.generation import BalanceControlRecord, ReconBreakRecord
 
 DEFAULT_RECON_BREAKS_LIMIT = 1000
 MAX_RECON_BREAKS_LIMIT = 10000
+
+
+def get_balance_sets(run_id: int) -> list[BalanceControlRecord]:
+    db = DuckDBManager.get_instance()
+    rows = db.execute(
+        """
+        SELECT id, run_id, dataset_id, source_dataset, name, config_json,
+               CAST(created_at AS VARCHAR)
+        FROM metadata_balance_sets
+        WHERE run_id = ?
+        ORDER BY id
+        """,
+        [run_id],
+    ).fetchall()
+    return [
+        BalanceControlRecord(
+            id=r[0],
+            run_id=r[1],
+            dataset_id=r[2],
+            source_dataset=r[3],
+            name=r[4],
+            config_json=r[5],
+            created_at=r[6],
+        )
+        for r in rows
+    ]
 
 
 def get_recon_breaks(
