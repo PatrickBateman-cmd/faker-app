@@ -26,7 +26,7 @@ const GENERATOR_OPTIONS = [
   "country", "country_code", "city", "street_address", "zipcode",
   "text", "boolean", "random_int", "pydecimal", "uuid4", "uuid_int",
   "bothify", "random_element", "currency_code", "swift", "iban", "bban",
-  "date_between", "date_of_birth", "date_time", "word",
+  "date_between", "date_of_birth", "date_time", "word", "formula",
 ];
 
 const TYPE_OPTIONS = ["string", "integer", "float", "boolean", "date"];
@@ -47,39 +47,49 @@ function SortableFieldRow({
   const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1 };
 
   return (
-    <div ref={setNodeRef} style={style} className="flex items-center gap-1 text-xs">
-      <button {...attributes} {...listeners} className="cursor-grab text-[var(--muted)] px-1">⠿</button>
-      <input
-        value={field.name}
-        onChange={(e) => onChange(dsIndex, index, (f) => ({ ...f, name: e.target.value }))}
-        className="w-24 bg-[var(--elevated)] border border-[var(--border)] rounded px-1.5 py-1 text-[var(--text)] placeholder:text-[var(--muted)] focus:outline-none focus:border-cyan-700"
-        placeholder="field_name"
-      />
-      <select
-        value={field.generator}
-        onChange={(e) => onChange(dsIndex, index, (f) => ({ ...f, generator: e.target.value }))}
-        className="w-28 bg-[var(--elevated)] border border-[var(--border)] rounded px-1.5 py-1 text-[var(--text)] focus:outline-none focus:border-cyan-700"
-      >
-        {GENERATOR_OPTIONS_LIST.map((g) => (
-          <option key={g} value={g}>{g}</option>
-        ))}
-      </select>
-      <select
-        value={field.type}
-        onChange={(e) => onChange(dsIndex, index, (f) => ({ ...f, type: e.target.value }))}
-        className="w-18 bg-[var(--elevated)] border border-[var(--border)] rounded px-1.5 py-1 text-[var(--muted)]"
-      >
-        {TYPE_OPTIONS_LIST.map((t) => (
-          <option key={t} value={t}>{t}</option>
-        ))}
-      </select>
-      <button
-        onClick={() => onRemove(dsIndex, index)}
-        className="text-[var(--muted)] hover:text-[var(--red)] px-1"
-        title="Remove field"
-      >
-        x
-      </button>
+    <div ref={setNodeRef} style={style} className="flex flex-col gap-1">
+      <div className="flex items-center gap-1 text-xs">
+        <button {...attributes} {...listeners} className="cursor-grab text-[var(--muted)] px-1">⠿</button>
+        <input
+          value={field.name}
+          onChange={(e) => onChange(dsIndex, index, (f) => ({ ...f, name: e.target.value }))}
+          className="w-24 bg-[var(--elevated)] border border-[var(--border)] rounded px-1.5 py-1 text-[var(--text)] placeholder:text-[var(--muted)] focus:outline-none focus:border-cyan-700"
+          placeholder="field_name"
+        />
+        <select
+          value={field.generator}
+          onChange={(e) => onChange(dsIndex, index, (f) => ({ ...f, generator: e.target.value }))}
+          className="w-28 bg-[var(--elevated)] border border-[var(--border)] rounded px-1.5 py-1 text-[var(--text)] focus:outline-none focus:border-cyan-700"
+        >
+          {GENERATOR_OPTIONS_LIST.map((g) => (
+            <option key={g} value={g}>{g}</option>
+          ))}
+        </select>
+        <select
+          value={field.type}
+          onChange={(e) => onChange(dsIndex, index, (f) => ({ ...f, type: e.target.value }))}
+          className="w-18 bg-[var(--elevated)] border border-[var(--border)] rounded px-1.5 py-1 text-[var(--muted)]"
+        >
+          {TYPE_OPTIONS_LIST.map((t) => (
+            <option key={t} value={t}>{t}</option>
+          ))}
+        </select>
+        <button
+          onClick={() => onRemove(dsIndex, index)}
+          className="text-[var(--muted)] hover:text-[var(--red)] px-1"
+          title="Remove field"
+        >
+          x
+        </button>
+      </div>
+      {field.generator === "formula" && (
+        <input
+          value={field.formula ?? ""}
+          onChange={(e) => onChange(dsIndex, index, (f) => ({ ...f, formula: e.target.value }))}
+          placeholder="Jinja2 formula, e.g. {{ sub_account_id[4:6] }} -- may only reference earlier fields"
+          className="ml-5 bg-[var(--elevated)] border border-[var(--border)] rounded px-1.5 py-1 text-[var(--text)] placeholder:text-[var(--muted)] focus:outline-none focus:border-cyan-700 text-xs"
+        />
+      )}
     </div>
   );
 }
