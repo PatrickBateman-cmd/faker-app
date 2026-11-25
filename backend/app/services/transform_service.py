@@ -4,22 +4,14 @@ import json
 import uuid
 
 from app.core.database import DuckDBManager
-from app.core.validation import validate_column_name, validate_table_name
+from app.core.validation import validate_column_name
 from app.schemas.aggregation import (
     AggregateRequest,
     AggregationDef,
     DedupRequest,
     TransformResponse,
 )
-from app.services.dataset_service import get_dataset
-
-
-def _get_table_name(source_dataset_id: str) -> str | None:
-    meta = get_dataset(source_dataset_id)
-    if not meta:
-        return None
-    return validate_table_name(meta["table_name"])
-
+from app.services.dataset_service import get_dataset_table_name, register_transformed_dataset
 
 _NUMERIC_AGG_FUNCTIONS = {"AVG", "SUM", "MIN", "MAX"}
 
@@ -51,7 +43,7 @@ def aggregate_dataset(
     source_dataset_id: str,
     request: AggregateRequest,
 ) -> TransformResponse:
-    table_name = _get_table_name(source_dataset_id)
+    table_name = get_dataset_table_name(source_dataset_id)
     if not table_name:
         msg = f"Source dataset '{source_dataset_id}' not found"
         raise ValueError(msg)
@@ -82,7 +74,7 @@ def aggregate_dataset(
     actual_count = count_row[0] if count_row else 0
 
     columns = request.group_by + agg_cols
-    _register_dataset(result_id, request.name, result_table, columns, actual_count)
+    register_transformed_dataset(result_id, request.name, result_table, columns, actual_count)
 
     db.execute(
         """
@@ -107,7 +99,7 @@ def dedup_dataset(
     source_dataset_id: str,
     request: DedupRequest,
 ) -> TransformResponse:
-    table_name = _get_table_name(source_dataset_id)
+    table_name = get_dataset_table_name(source_dataset_id)
     if not table_name:
         msg = f"Source dataset '{source_dataset_id}' not found"
         raise ValueError(msg)
@@ -162,7 +154,7 @@ def dedup_dataset(
     count_row = db.execute(f'SELECT COUNT(*) FROM "{result_table}"').fetchone()
     actual_count = count_row[0] if count_row else 0
 
-    _register_dataset(result_id, request.name, result_table, all_cols, actual_count)
+    register_transformed_dataset(result_id, request.name, result_table, all_cols, actual_count)
 
     db.execute(
         """
@@ -180,23 +172,6 @@ def dedup_dataset(
         columns=all_cols,
         source_dataset=source_dataset_id,
         transform_type="dedup",
-    )
-
-
-def _register_dataset(
-    dataset_id: str,
-    name: str,
-    table_name: str,
-    columns: list[str],
-    row_count: int,
-) -> None:
-    db = DuckDBManager.get_instance()
-    db.execute(
-        """
-        INSERT INTO metadata_datasets (dataset_id, run_id, name, table_name, columns_json, row_count, homogeneity, seed)
-        VALUES (?, NULL, ?, ?, ?, ?, NULL, NULL)
-        """,
-        [dataset_id, name, table_name, json.dumps(columns), row_count],
     )
 
 

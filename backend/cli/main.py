@@ -8,6 +8,7 @@ from cli import templates as _templates
 from cli import iso20022 as _iso20022
 from cli import financial as _financial
 from cli import transform as _transform
+from cli import balance as _balance
 from cli import tui as _tui
 from cli import kaggle as _kaggle
 
@@ -83,5 +84,6 @@ app.add_typer(_templates.app, name="templates", help="Manage templates")
 app.add_typer(_iso20022.app, name="iso", help="ISO 20022 catalog")
 app.add_typer(_financial.app, name="financial", help="Financial data via yfinance")
 app.add_typer(_transform.app, name="transform", help="Aggregate or dedup datasets")
+app.add_typer(_balance.app, name="balance", help="Derive account balances with optional injected breaks")
 app.add_typer(_tui.app, name="tui", help="Launch terminal user interface")
 app.add_typer(_kaggle.app, name="kaggle", help="Import datasets from Kaggle")

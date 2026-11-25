@@ -7,7 +7,18 @@ from fastapi.responses import JSONResponse
 
 from app.config import settings
 from app.core.database import DuckDBManager
-from app.routers import aggregation, datasets, exports, financial, generation, health, iso20022, kaggle, templates
+from app.routers import (
+    aggregation,
+    balance,
+    datasets,
+    exports,
+    financial,
+    generation,
+    health,
+    iso20022,
+    kaggle,
+    templates,
+)
 from app.services import iso20022_service
 from app.services.template_library import _init_sample_templates
 
@@ -45,6 +56,7 @@ app.include_router(iso20022.router, prefix="")
 app.include_router(generation.router, prefix="")
 app.include_router(datasets.router, prefix="")
 app.include_router(aggregation.router, prefix="")
+app.include_router(balance.router, prefix="")
 app.include_router(exports.router, prefix="")
 app.include_router(financial.router, prefix="")
 app.include_router(kaggle.router, prefix="")

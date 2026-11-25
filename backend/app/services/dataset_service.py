@@ -113,6 +113,30 @@ def delete_dataset(dataset_id: str) -> bool:
     return True
 
 
+def get_dataset_table_name(dataset_id: str) -> str | None:
+    meta = get_dataset(dataset_id)
+    if not meta:
+        return None
+    return validate_table_name(meta["table_name"])
+
+
+def register_transformed_dataset(
+    dataset_id: str,
+    name: str,
+    table_name: str,
+    columns: list[str],
+    row_count: int,
+) -> None:
+    db = DuckDBManager.get_instance()
+    db.execute(
+        """
+        INSERT INTO metadata_datasets (dataset_id, run_id, name, table_name, columns_json, row_count, homogeneity, seed)
+        VALUES (?, NULL, ?, ?, ?, ?, NULL, NULL)
+        """,
+        [dataset_id, name, table_name, json.dumps(columns), row_count],
+    )
+
+
 def get_dataset_columns(dataset_id: str) -> list[dict]:
     meta = get_dataset(dataset_id)
     if not meta:

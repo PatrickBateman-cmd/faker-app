@@ -5,19 +5,21 @@ import { useState } from "react";
 import { deleteDataset, fetchDatasetRows, fetchDatasets } from "../../api/datasets";
 import AggregationPanel from "../AggregationPanel/AggregationPanel";
 import DedupPanel from "../DedupPanel/DedupPanel";
+import BalancePanel from "../BalancePanel/BalancePanel";
 import { DatasetChart } from "../DatasetChart/DatasetChart";
 import { CollapsibleSection } from "../CollapsibleSection/CollapsibleSection";
 import { useToast } from "../../hooks/useToast";
 
-type SectionKey = "data" | "chart" | "aggregate" | "dedup";
+type SectionKey = "data" | "chart" | "aggregate" | "dedup" | "balance";
 const SECTION_LABELS: Record<SectionKey, string> = {
   data: "Data",
   chart: "Chart",
   aggregate: "Aggregate",
   dedup: "Dedup",
+  balance: "Balances",
 };
-const ALL_SECTIONS: SectionKey[] = ["data", "chart", "aggregate", "dedup"];
-const DEFAULT_COLLAPSED = new Set<SectionKey>(["chart", "aggregate", "dedup"]);
+const ALL_SECTIONS: SectionKey[] = ["data", "chart", "aggregate", "dedup", "balance"];
+const DEFAULT_COLLAPSED = new Set<SectionKey>(["chart", "aggregate", "dedup", "balance"]);
 
 export function ResultsViewer({ preselectedDatasetId }: { preselectedDatasetId?: string }) {
   const { addToast } = useToast();
@@ -317,6 +319,15 @@ export function ResultsViewer({ preselectedDatasetId }: { preselectedDatasetId?:
                 columns={selectedMeta.columns}
                 onResult={handleTransformResult}
                 onBack={() => toggleSectionCollapsed("dedup")}
+              />
+            )}
+
+            {key === "balance" && selectedMeta && (
+              <BalancePanel
+                datasetId={selectedId}
+                columns={selectedMeta.columns}
+                onResult={handleTransformResult}
+                onBack={() => toggleSectionCollapsed("balance")}
               />
             )}
               </CollapsibleSection>
