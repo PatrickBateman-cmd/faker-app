@@ -13,3 +13,6 @@ duckdb/
 *.pyc
 .DS_Store
 .claude/worktrees/
+
+# IDE
+.idea/
